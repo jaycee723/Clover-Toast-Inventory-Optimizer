@@ -1,0 +1,6 @@
+{
+  "summary":  "Revised implementation plan enforcing mandatory manual approval for all pricing changes, granular row- and field-level individual accept/reject controls for all item adjustments, and an explicit pre-export finalization review gate before committing Toast POS files.",
+  "updatedAt":  "2026-10-26T05:17:19.943666755Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

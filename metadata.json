@@ -1,0 +1,8 @@
+{
+  "name": "CLONE clover-toast-inventory-cleaner",
+  "description": "Imported from GitHub",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
