@@ -50,6 +50,7 @@ test('approved export waits for every proposal, then contains only decided rows'
   await els.dlApproved.onclick();
   assert.ok(!(await lastBlob.text()).includes('Bud Light 12 Pack'), 'name proposal is still undecided');
   fire(bodyRows()[0].children[5].children[0], 'change', 'accept');
+  if (bodyRows()[0].children[7]?.children?.[0]) fire(bodyRows()[0].children[7].children[0], 'change', 'accept');
   await els.dlApproved.onclick();
   const text = await lastBlob.text();
   assert.ok(text.includes('Bud Light 12 Pack'));

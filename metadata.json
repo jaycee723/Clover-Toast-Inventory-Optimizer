@@ -1,6 +1,6 @@
 {
-  "name": "CLONE clover-toast-inventory-cleaner",
-  "description": "Imported from GitHub",
+  "name": "Clover to Toast Retail Import Studio",
+  "description": "Turn messy Clover POS spreadsheets into 100% compliant Toast import files with Gemini Autopilot and strict operator approval gates.",
   "permissions": [],
   "capabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

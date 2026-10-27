@@ -15,15 +15,15 @@ import {
 } from 'firebase/firestore';
 
 export const firebaseConfig = {
-  projectId: "gen-lang-client-0818748893",
-  appId: "1:631752805082:web:a11e38801d3a82c326f3e3",
-  apiKey: "AIzaSyAQGoK6J2FVfv8OSqWc8L5OD5f0MqJtxyk",
-  authDomain: "gen-lang-client-0818748893.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-clovertoastinven-34640a8c-f990-49f8-9484-bf8ae1f0691b",
-  storageBucket: "gen-lang-client-0818748893.firebasestorage.app",
-  messagingSenderId: "631752805082",
+  projectId: "infinite-lacing-b01dl",
+  appId: "1:73867399145:web:dca496c6c07ee858ef0578",
+  apiKey: "AIzaSyAdvYVYf4TM7X-olVKt7_ikc5VWQQM6TrE",
+  authDomain: "infinite-lacing-b01dl.firebaseapp.com",
+  firestoreDatabaseId: "(default)",
+  storageBucket: "infinite-lacing-b01dl.firebasestorage.app",
+  messagingSenderId: "73867399145",
   measurementId: "",
-  oAuthClientId: "631752805082-kucmu5mgth3ds4uj1khkjfnsglko9ajg.apps.googleusercontent.com",
+  oAuthClientId: "73867399145-7bs4lk0nsupbf07a5njq7h0sk6tuom7n.apps.googleusercontent.com",
   recaptchaSiteKey: ""
 };
 
@@ -123,8 +123,77 @@ export function onAuthChange(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
+export async function saveSqlSession(name, sessionPayload, itemCount = 0, catalogData = []) {
+  if (!auth.currentUser) throw new Error('Please sign in to save sessions to Cloud SQL');
+  const token = await auth.currentUser.getIdToken();
+  const res = await fetch('/api/db/sessions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      name,
+      recordsCount: itemCount,
+      decisionsJson: typeof sessionPayload === 'string' ? sessionPayload : JSON.stringify(sessionPayload),
+      catalogJson: JSON.stringify(catalogData || [])
+    })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to save session to Cloud SQL');
+  return data.session;
+}
+
+export async function listSqlSessions() {
+  if (!auth.currentUser) return [];
+  const token = await auth.currentUser.getIdToken();
+  const res = await fetch('/api/db/sessions', {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to fetch sessions from Cloud SQL');
+  return data.sessions || [];
+}
+
+export async function loadSqlSession(sessionId) {
+  if (!auth.currentUser) throw new Error('Please sign in to load sessions from Cloud SQL');
+  const token = await auth.currentUser.getIdToken();
+  const res = await fetch(`/api/db/sessions/${sessionId}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load session from Cloud SQL');
+  return data.session;
+}
+
+export async function deleteSqlSession(sessionId) {
+  if (!auth.currentUser) throw new Error('Please sign in');
+  const token = await auth.currentUser.getIdToken();
+  const res = await fetch(`/api/db/sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to delete session from Cloud SQL');
+  return true;
+}
+
 export async function saveCloudSession(name, sessionPayload, itemCount = 0, approvedCount = 0) {
   if (!auth.currentUser) throw new Error('Please sign in to save sessions to the cloud');
+  // First attempt saving to Cloud SQL relational database backend
+  try {
+    const sqlSession = await saveSqlSession(name, sessionPayload, itemCount);
+    if (sqlSession) return { id: String(sqlSession.id), name: sqlSession.name };
+  } catch (sqlErr) {
+    console.warn('Cloud SQL session save fallback to Firestore:', sqlErr?.message);
+  }
+
   const userId = auth.currentUser.uid;
   const safeName = (name || `Session ${new Date().toLocaleDateString()}`).trim().slice(0, 128);
   const sessionId = 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
@@ -151,6 +220,22 @@ export async function saveCloudSession(name, sessionPayload, itemCount = 0, appr
 
 export async function listCloudSessions() {
   if (!auth.currentUser) return [];
+  // First attempt listing from Cloud SQL
+  try {
+    const sqlSessions = await listSqlSessions();
+    if (sqlSessions && sqlSessions.length > 0) {
+      return sqlSessions.map((s) => ({
+        id: String(s.id),
+        name: s.name,
+        itemCount: s.recordsCount,
+        approvedCount: s.recordsCount,
+        updatedAt: s.updatedAt
+      }));
+    }
+  } catch (sqlErr) {
+    console.warn('Cloud SQL list fallback to Firestore:', sqlErr?.message);
+  }
+
   const userId = auth.currentUser.uid;
   const sessionsPath = `users/${userId}/sessions`;
   try {
@@ -164,6 +249,24 @@ export async function listCloudSessions() {
 
 export async function loadCloudSession(sessionId) {
   if (!auth.currentUser) throw new Error('Please sign in to load sessions from the cloud');
+  // If session is a numeric ID, load from Cloud SQL
+  if (/^\d+$/.test(String(sessionId))) {
+    try {
+      const sqlSession = await loadSqlSession(sessionId);
+      if (sqlSession) {
+        return {
+          id: String(sqlSession.id),
+          name: sqlSession.name,
+          decisionsJson: sqlSession.decisionsJson,
+          catalogJson: sqlSession.catalogJson,
+          itemCount: sqlSession.recordsCount
+        };
+      }
+    } catch (sqlErr) {
+      console.warn('Cloud SQL load fallback to Firestore:', sqlErr?.message);
+    }
+  }
+
   const userId = auth.currentUser.uid;
   const docPath = `users/${userId}/sessions/${sessionId}`;
   try {
@@ -177,6 +280,15 @@ export async function loadCloudSession(sessionId) {
 
 export async function deleteCloudSession(sessionId) {
   if (!auth.currentUser) throw new Error('Please sign in');
+  if (/^\d+$/.test(String(sessionId))) {
+    try {
+      await deleteSqlSession(sessionId);
+      return;
+    } catch (sqlErr) {
+      console.warn('Cloud SQL delete fallback to Firestore:', sqlErr?.message);
+    }
+  }
+
   const userId = auth.currentUser.uid;
   const docPath = `users/${userId}/sessions/${sessionId}`;
   try {
@@ -185,3 +297,4 @@ export async function deleteCloudSession(sessionId) {
     handleFirestoreError(err, OperationType.DELETE, docPath);
   }
 }
+

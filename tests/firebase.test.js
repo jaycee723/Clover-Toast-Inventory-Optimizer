@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { firebaseConfig, OperationType, handleFirestoreError } from '../src/firebase.js';
 
 test('Firebase configuration contains all required project identifiers', () => {
-  assert.equal(firebaseConfig.projectId, 'gen-lang-client-0818748893');
+  assert.ok(firebaseConfig.projectId, 'projectId must be present');
   assert.ok(firebaseConfig.apiKey, 'API key must be present');
   assert.ok(firebaseConfig.authDomain, 'authDomain must be present');
   assert.ok(firebaseConfig.firestoreDatabaseId, 'firestoreDatabaseId must be present');

@@ -143,14 +143,22 @@
         <div style="background:#1e1b4b;border:1px solid #4338ca;border-radius:10px;padding:20px;margin-bottom:18px;">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
             <div>
-              <h3 style="margin:0 0 6px 0;font-size:17px;color:#ffffff;">Run Full Autopilot Normalization</h3>
+              <h3 style="margin:0 0 6px 0;font-size:17px;color:#ffffff;display:flex;align-items:center;gap:8px;">
+                <span>Run Autopilot Catalog Normalization</span>
+                <span class="ai-badge" style="background:#4338ca;">Web-Grounded</span>
+              </h3>
               <p style="margin:0;font-size:13px;color:#c7d2fe;">
-                Executes industry packaging rules, Title Case brand normalization, and barcode check digit verification across all loaded items.
+                Executes balanced retail categorization, Title Case brand normalization, packaging standardization, and 13-digit barcode padding.
               </p>
             </div>
-            <button id="btnRunSmartClean" type="button" class="btn-auto-process" style="padding:12px 24px;font-size:15px;">
-              <span>🚀 1-Click Smart Clean</span>
-            </button>
+            <div class="flex-wrap" style="gap:10px;">
+              <button id="btnRunGeminiAutopilot" type="button" class="btn-ai-assistant" style="padding:12px 20px;font-size:14px;">
+                <span>✨ Run Gemini Autopilot (Web Search)</span>
+              </button>
+              <button id="btnRunSmartClean" type="button" class="btn-auto-process" style="padding:12px 20px;font-size:14px;">
+                <span>🚀 1-Click Fast Clean</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -194,7 +202,7 @@
                 <span>📋 Step 3: Review &amp; Fine-Tune Edits</span>
               </h2>
               <p class="wizard-pane-desc">
-                High-certainty edits are verified. Items with ambiguous abbreviations or logic warnings are flagged for your review with 1-click edit, accept, or revert.
+                High-certainty edits are verified. Items with ambiguous abbreviations, pending price proposals, or logic warnings are flagged for your review with individual edit, accept, or revert controls.
               </p>
             </div>
             <span id="step3StatsBadge" class="status-pill" style="font-size:12px;">0 items</span>
@@ -218,7 +226,9 @@
           <div class="flex-wrap" style="gap:10px;align-items:center;">
             <label class="small text-muted" style="margin:0;">Filter:
               <select id="step3Filter" style="padding:4px 8px;font-size:12px;background:#0f172a;color:#fff;border:1px solid #475569;border-radius:4px;">
-                <option value="flagged">⚠️ Flagged for Review (Uncertain Logic)</option>
+                <option value="flagged">⚠️ Flagged for Review (Uncertain Logic / Price)</option>
+                <option value="price_pending">💲 Pending Price Approval</option>
+                <option value="price_missing">❌ Missing Price ($0.00)</option>
                 <option value="all">All Items</option>
                 <option value="modified">Modified Items Only</option>
                 <option value="approved">Approved Items Only</option>
@@ -233,12 +243,12 @@
           <table style="width:100%;border-collapse:collapse;font-size:13px;text-align:left;">
             <thead>
               <tr style="background:#1e293b;color:#94a3b8;border-bottom:1px solid #334155;">
-                <th style="padding:10px 12px;width:160px;">Certainty &amp; Status</th>
+                <th style="padding:10px 12px;width:150px;">Certainty &amp; Status</th>
                 <th style="padding:10px 12px;min-width:240px;">Item Name (Current / Proposed)</th>
                 <th style="padding:10px 12px;width:160px;">Category</th>
-                <th style="padding:10px 12px;width:150px;">Barcode (SKU)</th>
-                <th style="padding:10px 12px;width:90px;">Price</th>
-                <th style="padding:10px 12px;width:140px;text-align:right;">Actions</th>
+                <th style="padding:10px 12px;width:140px;">Barcode (SKU)</th>
+                <th style="padding:10px 12px;width:160px;">Price &amp; Margin</th>
+                <th style="padding:10px 12px;width:150px;text-align:right;">Actions</th>
               </tr>
             </thead>
             <tbody id="step3TableBody"></tbody>
@@ -248,7 +258,7 @@
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-top:18px;">
           <button id="btnBackToStep2From3" type="button" class="btn-secondary">⬅ Back to Smart Clean</button>
           <div class="flex-wrap" style="gap:10px;">
-            <button id="btnGoToStep4" type="button" class="btn-toast">Proceed to Final Toast Export ➔</button>
+            <button id="btnGoToStep4" type="button" class="btn-toast">Proceed to Final Review &amp; Export ➔</button>
           </div>
         </div>
       </section>
@@ -257,11 +267,54 @@
       <section id="stepPane4" class="wizard-pane" style="display:none;">
         <div class="wizard-pane-header">
           <h2 class="wizard-pane-title">
-            <span>🍞 Step 4: Export Cleaned Catalog for Toast POS</span>
+            <span>🍞 Step 4: Final Review &amp; Toast POS Export</span>
           </h2>
           <p class="wizard-pane-desc">
-            Download your validated catalog formatted for Toast POS, with barcode mapped as SKU and Barcode product identity.
+            Review the finalization quality gate, confirm pricing approvals, and download validated catalogs formatted for Toast POS.
           </p>
+        </div>
+
+        <!-- Pre-Export Quality Gate Card -->
+        <div id="preExportGateCard" class="pre-export-gate">
+          <div class="gate-header">
+            <div>
+              <h3 style="margin:0 0 4px 0;font-size:16px;color:#ffffff;display:flex;align-items:center;gap:8px;">
+                <span>📋 Pre-Export Finalization Quality Gate</span>
+                <span id="gateOverallBadge" class="status-pill" style="font-size:11px;">Verification Check</span>
+              </h3>
+              <p class="small text-muted" style="margin:0;">
+                Review and confirm all catalog adjustments, barcode identities, and approved retail prices before downloading import files.
+              </p>
+            </div>
+            <button id="btnGateReviewAll" type="button" class="btn-secondary btn-sm">Review in Step 3 ➔</button>
+          </div>
+          <div class="gate-grid">
+            <div class="gate-box">
+              <span class="gate-box-label">Verified Toast-Ready</span>
+              <span id="gateVerifiedCount" class="gate-box-val" style="color:#4ade80;">0</span>
+            </div>
+            <div class="gate-box">
+              <span class="gate-box-label">Pending Price Approvals</span>
+              <span id="gatePricePendingCount" class="gate-box-val" style="color:#f59e0b;">0</span>
+            </div>
+            <div class="gate-box">
+              <span class="gate-box-label">Missing Prices ($0.00)</span>
+              <span id="gatePriceMissingCount" class="gate-box-val" style="color:#f87171;">0</span>
+            </div>
+            <div class="gate-box">
+              <span class="gate-box-label">Barcode Issues</span>
+              <span id="gateBarcodeIssuesCount" class="gate-box-val" style="color:#fbbf24;">0</span>
+            </div>
+          </div>
+          <div id="gateWarningBanner" style="display:none;background:#2d1a1a;border:1px solid #ef4444;border-radius:6px;padding:10px 14px;color:#fca5a5;font-size:12px;margin-bottom:12px;">
+            <strong>⚠️ Attention Required:</strong> <span id="gateWarningText">Items have pending price approvals or missing prices. You can resolve them individually in Step 3 or proceed with verified items only.</span>
+          </div>
+          <div class="flex-wrap" style="align-items:center;gap:10px;">
+            <label style="font-size:13px;color:#cbd5e1;display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+              <input type="checkbox" id="gateSignOffCheckbox">
+              <span>I have reviewed and confirmed all catalog changes and pricing for Toast import</span>
+            </label>
+          </div>
         </div>
 
         <!-- Dual Export Cards -->
@@ -463,10 +516,11 @@
       <!-- Copilot Footer & Interactive Input -->
       <div class="ai-companion-footer">
         <div class="ai-quick-chips">
-          <button type="button" class="ai-chip-pill" data-prompt="Title-case all brand names across the catalog">Title Case Brands</button>
-          <button type="button" class="ai-chip-pill" data-prompt="Standardize bottle sizes (e.g. 750ml, 1.75L) in item names">Normalize Volumes</button>
-          <button type="button" class="ai-chip-pill" data-prompt="Convert '6PK' and '12PK' to clean '6-Pack' and '12-Pack'">Standardize Packs</button>
-          <button type="button" class="ai-chip-pill" data-prompt="What should I do next to prepare my Toast import?">What's Next?</button>
+          <button type="button" class="ai-chip-pill" data-prompt="Clean &amp; title-case all brand names with volume and packaging at the end">Title Case Brands</button>
+          <button type="button" class="ai-chip-pill" data-prompt="Assign balanced categories (Beer, Wine, Spirits, RTD, Non-Alcoholic, Snacks, Tobacco) to all items">Balanced Categories</button>
+          <button type="button" class="ai-chip-pill" data-prompt="Audit prices and calculate profit margins across the catalog">Audit Prices &amp; Margins</button>
+          <button type="button" class="ai-chip-pill" data-prompt="Verify unknown barcodes and bottle sizes using live web search">Web Barcode Search</button>
+          <button type="button" class="ai-chip-pill" data-prompt="What should I do next to finalize my Toast POS import?">What's Next?</button>
         </div>
         <div style="display:flex;gap:8px;align-items:flex-end;">
           <textarea id="aiChatInput" class="ai-textarea" rows="2" placeholder="Ask Gemini to format, title-case, or guide you..."></textarea>

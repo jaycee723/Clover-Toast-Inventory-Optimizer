@@ -4,6 +4,9 @@ import { parseReferenceCsv, buildReferenceIndex, referenceTemplateCsv } from './
 import {
   buildRows,
   setDecision,
+  setFieldDecision,
+  approvePrice,
+  rejectPrice,
   issues,
   approvedRows,
   acceptCleanBarcodes,
@@ -2189,8 +2192,55 @@ export function setWizardStep(stepNum) {
 
   if (stepNum === 3) {
     renderStep3Table();
+  } else if (stepNum === 4) {
+    updatePreExportGate();
   }
 }
+
+export function updatePreExportGate() {
+  const verifiedCount = S.rows.filter((r) => isApproved(r) && Number(r.price) > 0).length;
+  const pricePendingCount = S.rows.filter((r) => r.price_status === 'pending_approval').length;
+  const priceMissingCount = S.rows.filter((r) => !r.price || Number(r.price) <= 0).length;
+  const barcodeIssuesCount = S.rows.filter((r) => r.barcode?.review || ['invalid', 'missing'].includes(r.barcode?.status)).length;
+
+  setText('gateVerifiedCount', String(verifiedCount));
+  setText('gatePricePendingCount', String(pricePendingCount));
+  setText('gatePriceMissingCount', String(priceMissingCount));
+  setText('gateBarcodeIssuesCount', String(barcodeIssuesCount));
+
+  const badge = $('gateOverallBadge');
+  const banner = $('gateWarningBanner');
+  const warningText = $('gateWarningText');
+
+  const hasWarnings = pricePendingCount > 0 || priceMissingCount > 0 || barcodeIssuesCount > 0;
+
+  if (badge) {
+    if (!hasWarnings && verifiedCount > 0) {
+      badge.textContent = '✓ 100% Ready';
+      badge.style.color = '#4ade80';
+      badge.style.borderColor = '#16a34a';
+    } else {
+      badge.textContent = '⚠️ Attention Needed';
+      badge.style.color = '#fbbf24';
+      badge.style.borderColor = '#d97706';
+    }
+  }
+
+  if (banner) {
+    if (hasWarnings) {
+      setDisplay(banner, 'block');
+      const issuesList = [];
+      if (pricePendingCount > 0) issuesList.push(`${pricePendingCount} price changes awaiting manual approval`);
+      if (priceMissingCount > 0) issuesList.push(`${priceMissingCount} items missing selling prices ($0.00)`);
+      if (barcodeIssuesCount > 0) issuesList.push(`${barcodeIssuesCount} items with unverified barcodes`);
+      if (warningText) warningText.textContent = `Found ${issuesList.join(', ')}. Review and resolve them in Step 3 or confirm sign-off below.`;
+    } else {
+      setDisplay(banner, 'none');
+    }
+  }
+}
+
+bindClick('btnGateReviewAll', () => setWizardStep(3));
 
 // Stepper click listeners
 for (let s = 1; s <= 4; s++) {
@@ -2285,7 +2335,67 @@ function onRunSmartClean() {
 
 bindClick('btnRunSmartClean', onRunSmartClean);
 
-// Step 3 Interactive Review Table Rendering with Certainty Flagging
+// Step 2 Gemini Web-Grounded Autopilot Handler
+async function onRunGeminiAutopilot() {
+  if (!S.records || !S.records.length) {
+    if ($('status')) $('status').textContent = 'Please load an inventory file in Step 1 first.';
+    return;
+  }
+  const btn = $('btnRunGeminiAutopilot');
+  if (btn) btn.disabled = true;
+
+  postAiAnnouncement('🌐 Initiating Gemini Autopilot with live Google Search grounding... analyzing catalog items, verifying barcodes, and checking prices.');
+
+  try {
+    const payload = {
+      prompt: 'Normalize all product names to clean retail Title Case with volume at end. Assign balanced categories (Beer, Wine, Spirits, RTD, Non-Alcoholic Drinks, Candy & Snacks, Tobacco & Vapes, General Retail). Look up unknown barcodes online. Audit prices and propose standardizations.',
+      items: prepareDatasetForAi(S.records, S.rows, 5000)
+    };
+
+    const res = await fetch('/api/ai/format', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to execute Gemini Autopilot');
+
+    // 1. Auto-pad barcodes to 13 digits locally as well
+    autoPadBarcodes13(S.records, S.rows);
+
+    // 2. Apply AI changes with mandatory price approval enforcement
+    const result = applyAiChanges(S.records, S.rows, data.changes || [], { requireManualPriceApproval: true });
+    S.lastAiUndoSnapshot = result.undoSnapshot;
+
+    // 3. Rebuild and accept clean barcodes
+    acceptCleanBarcodes(S.rows);
+    rebuild(true);
+
+    // 4. Update scorecard
+    const scorecard = $('step2Scorecard');
+    if (scorecard) setDisplay(scorecard, 'block');
+
+    const readyToast = S.rows.filter(isApproved).length;
+    const pricePendingCount = S.rows.filter((r) => r.price_status === 'pending_approval').length;
+    setText('scBrandsTitleCased', String(result.appliedCount));
+    setText('scPacksNormalized', String(data.changes?.length || 0));
+    setText('scBarcodesPadded', String(S.rows.filter((r) => r.barcode?.padded).length));
+    setText('scTotalToastReady', String(readyToast));
+
+    const priceNote = pricePendingCount > 0 ? ` (${pricePendingCount} price adjustments held for your manual review in Step 3)` : '';
+    postAiAnnouncement(`✨ Gemini Autopilot Complete! Standardized ${result.appliedCount} catalog items via web-grounded analysis${priceNote}. Validated ${readyToast} items ready for Toast POS!`);
+  } catch (err) {
+    postAiAnnouncement(`⚠️ Gemini Autopilot note: ${err.message}. Running smart local clean fallback...`);
+    onRunSmartClean();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+bindClick('btnRunGeminiAutopilot', onRunGeminiAutopilot);
+
+// Step 3 Interactive Review Table Rendering with Certainty Flagging & Price Governance
 export function renderStep3Table() {
   const tbody = $('step3TableBody');
   if (!tbody) return;
@@ -2301,8 +2411,10 @@ export function renderStep3Table() {
 
   const filtered = evaluatedRows.filter(({ row, cert }) => {
     if (filterMode === 'flagged' && !cert.flagged) return false;
+    if (filterMode === 'price_pending' && row.price_status !== 'pending_approval') return false;
+    if (filterMode === 'price_missing' && (row.price && Number(row.price) > 0)) return false;
     if (filterMode === 'approved' && !isApproved(row)) return false;
-    if (filterMode === 'modified' && !row.manuallyEdited && !row.proposed_name && !row.proposed_category) return false;
+    if (filterMode === 'modified' && !row.manuallyEdited && !row.proposed_name && !row.proposed_category && !row.proposed_price) return false;
 
     if (!searchQ) return true;
     const n = (row.current_name || '').toLowerCase();
@@ -2326,7 +2438,7 @@ export function renderStep3Table() {
     td.style.textAlign = 'center';
     td.style.color = '#94a3b8';
     td.innerHTML = filterMode === 'flagged'
-      ? '🎉 <strong>No items need review!</strong> All catalog items passed certainty checks. Click "Proceed to Final Toast Export" below.'
+      ? '🎉 <strong>No items need review!</strong> All catalog items passed certainty checks. Click "Proceed to Final Review &amp; Export" below.'
       : 'No items match your filter criteria.';
     tr.append(td);
     tbody.append(tr);
@@ -2350,6 +2462,22 @@ export function renderStep3Table() {
     certBadge.textContent = cert.flagged ? '⚠️ Review Needed' : '✓ High Certainty';
     tdCert.append(certBadge);
 
+    if (row.price_status === 'pending_approval') {
+      const priceBadge = document.createElement('div');
+      priceBadge.className = 'price-pending-badge';
+      priceBadge.style.marginTop = '4px';
+      priceBadge.textContent = '💲 Price Pending';
+      tdCert.append(priceBadge);
+    } else if (!row.price || Number(row.price) <= 0) {
+      const missingPriceBadge = document.createElement('div');
+      missingPriceBadge.style.marginTop = '4px';
+      missingPriceBadge.style.fontSize = '10px';
+      missingPriceBadge.style.color = '#f87171';
+      missingPriceBadge.style.fontWeight = '700';
+      missingPriceBadge.textContent = '❌ Price Missing';
+      tdCert.append(missingPriceBadge);
+    }
+
     if (cert.flagged && cert.reasons?.length) {
       const reasonBox = document.createElement('div');
       reasonBox.style.fontSize = '11px';
@@ -2360,7 +2488,7 @@ export function renderStep3Table() {
     }
     if (isApproved(row)) {
       const appBadge = document.createElement('span');
-      appBadge.className = 'status-pill';
+      appBadge.className = 'status-pill ok';
       appBadge.style.fontSize = '10px';
       appBadge.style.padding = '2px 6px';
       appBadge.style.marginTop = '4px';
@@ -2369,7 +2497,7 @@ export function renderStep3Table() {
       tdCert.append(appBadge);
     }
 
-    // Col 2: Item Name (with editable input)
+    // Col 2: Item Name (with editable input and individual field buttons)
     const tdName = document.createElement('td');
     tdName.style.padding = '10px 12px';
     tdName.style.verticalAlign = 'top';
@@ -2393,15 +2521,36 @@ export function renderStep3Table() {
     if (row.proposed_name && row.proposed_name !== row.current_name) {
       const propDiv = document.createElement('div');
       propDiv.className = 'small ok';
-      propDiv.style.marginTop = '2px';
+      propDiv.style.marginTop = '3px';
       propDiv.textContent = `Auto proposal: ${row.proposed_name}`;
       tdName.append(propDiv);
+
+      const fieldBtnBox = document.createElement('div');
+      fieldBtnBox.className = 'flex-wrap';
+      fieldBtnBox.style.gap = '4px';
+      fieldBtnBox.style.marginTop = '4px';
+
+      const acceptNameBtn = document.createElement('button');
+      acceptNameBtn.type = 'button';
+      acceptNameBtn.className = 'field-ctrl-btn field-ctrl-accept btn-accept-name';
+      acceptNameBtn.dataset.id = row.id;
+      acceptNameBtn.textContent = '✓ Accept Name';
+
+      const rejectNameBtn = document.createElement('button');
+      rejectNameBtn.type = 'button';
+      rejectNameBtn.className = 'field-ctrl-btn field-ctrl-reject btn-reject-name';
+      rejectNameBtn.dataset.id = row.id;
+      rejectNameBtn.textContent = '✕ Reject';
+
+      fieldBtnBox.append(acceptNameBtn, rejectNameBtn);
+      tdName.append(fieldBtnBox);
     }
 
-    // Col 3: Category (with editable input)
+    // Col 3: Category (with editable input and individual field buttons)
     const tdCat = document.createElement('td');
     tdCat.style.padding = '10px 12px';
     tdCat.style.verticalAlign = 'top';
+
     const catInput = document.createElement('input');
     catInput.type = 'text';
     catInput.className = 'row-edit-input';
@@ -2410,6 +2559,34 @@ export function renderStep3Table() {
     catInput.value = row.category || '';
     catInput.title = 'Edit category';
     tdCat.append(catInput);
+
+    if (row.proposed_category && row.proposed_category !== row.category) {
+      const propCatDiv = document.createElement('div');
+      propCatDiv.className = 'small ok';
+      propCatDiv.style.marginTop = '3px';
+      propCatDiv.textContent = `Auto proposal: ${row.proposed_category}`;
+      tdCat.append(propCatDiv);
+
+      const fieldCatBox = document.createElement('div');
+      fieldCatBox.className = 'flex-wrap';
+      fieldCatBox.style.gap = '4px';
+      fieldCatBox.style.marginTop = '4px';
+
+      const acceptCatBtn = document.createElement('button');
+      acceptCatBtn.type = 'button';
+      acceptCatBtn.className = 'field-ctrl-btn field-ctrl-accept btn-accept-cat';
+      acceptCatBtn.dataset.id = row.id;
+      acceptCatBtn.textContent = '✓ Accept Cat';
+
+      const rejectCatBtn = document.createElement('button');
+      rejectCatBtn.type = 'button';
+      rejectCatBtn.className = 'field-ctrl-btn field-ctrl-reject btn-reject-cat';
+      rejectCatBtn.dataset.id = row.id;
+      rejectCatBtn.textContent = '✕ Reject';
+
+      fieldCatBox.append(acceptCatBtn, rejectCatBtn);
+      tdCat.append(fieldCatBox);
+    }
 
     // Col 4: Barcode (with editable input)
     const tdBarcode = document.createElement('td');
@@ -2432,13 +2609,84 @@ export function renderStep3Table() {
       tdBarcode.append(bcType);
     }
 
-    // Col 5: Price
+    // Col 5: Price & Margin (with mandatory approval controls)
     const tdPrice = document.createElement('td');
     tdPrice.style.padding = '10px 12px';
     tdPrice.style.verticalAlign = 'top';
-    tdPrice.innerHTML = `<span class="toast-preview-price">$${formatToastPrice(row.price) || '0.00'}</span>`;
 
-    // Col 6: Actions (Accept & Revert)
+    const priceInput = document.createElement('input');
+    priceInput.type = 'text';
+    priceInput.className = 'row-edit-input';
+    priceInput.dataset.id = row.id;
+    priceInput.dataset.field = 'price';
+    priceInput.value = row.price || '';
+    priceInput.placeholder = '0.00';
+    priceInput.style.width = '75px';
+    tdPrice.append(priceInput);
+
+    if (row.cost && Number(row.cost) > 0) {
+      const costDiv = document.createElement('div');
+      costDiv.className = 'small text-muted';
+      costDiv.style.marginTop = '2px';
+      costDiv.textContent = `Cost: $${formatToastPrice(row.cost)}`;
+      tdPrice.append(costDiv);
+
+      if (row.margin) {
+        const marginSpan = document.createElement('span');
+        marginSpan.className = `margin-badge ${Number(row.margin) < 0 ? 'negative' : ''}`;
+        marginSpan.style.marginTop = '2px';
+        marginSpan.style.display = 'inline-block';
+        marginSpan.textContent = `${row.margin}% margin`;
+        tdPrice.append(marginSpan);
+      }
+    }
+
+    if (row.price_status === 'pending_approval' && row.proposed_price) {
+      const propPriceBox = document.createElement('div');
+      propPriceBox.className = 'price-pending-badge';
+      propPriceBox.style.marginTop = '4px';
+      propPriceBox.textContent = `Proposed: $${row.proposed_price}`;
+      tdPrice.append(propPriceBox);
+
+      if (row.price_proposal_reason) {
+        const reasonDiv = document.createElement('div');
+        reasonDiv.style.fontSize = '10px';
+        reasonDiv.style.color = '#fcd34d';
+        reasonDiv.style.marginTop = '2px';
+        reasonDiv.textContent = row.price_proposal_reason;
+        tdPrice.append(reasonDiv);
+      }
+
+      const priceActionBox = document.createElement('div');
+      priceActionBox.className = 'flex-wrap';
+      priceActionBox.style.gap = '4px';
+      priceActionBox.style.marginTop = '4px';
+
+      const approvePriceBtn = document.createElement('button');
+      approvePriceBtn.type = 'button';
+      approvePriceBtn.className = 'btn-price-approve btn-approve-price';
+      approvePriceBtn.dataset.id = row.id;
+      approvePriceBtn.textContent = '✓ Approve Price';
+
+      const rejectPriceBtn = document.createElement('button');
+      rejectPriceBtn.type = 'button';
+      rejectPriceBtn.className = 'btn-price-reject btn-reject-price';
+      rejectPriceBtn.dataset.id = row.id;
+      rejectPriceBtn.textContent = '↩️ Keep Orig';
+
+      priceActionBox.append(approvePriceBtn, rejectPriceBtn);
+      tdPrice.append(priceActionBox);
+    } else if (!row.price || Number(row.price) <= 0) {
+      const missingWarn = document.createElement('div');
+      missingWarn.style.color = '#f87171';
+      missingWarn.style.fontSize = '11px';
+      missingWarn.style.fontWeight = '700';
+      missingWarn.style.marginTop = '4px';
+      missingWarn.textContent = '⚠️ Price Missing ($0.00)';
+      tdPrice.append(missingWarn);
+    }
+
+    // Col 6: Actions (Accept All & Revert Row)
     const tdActions = document.createElement('td');
     tdActions.style.padding = '10px 12px';
     tdActions.style.verticalAlign = 'top';
@@ -2453,13 +2701,13 @@ export function renderStep3Table() {
     acceptBtn.type = 'button';
     acceptBtn.className = 'btn-toast btn-sm btn-row-accept';
     acceptBtn.dataset.id = row.id;
-    acceptBtn.textContent = '✓ Accept';
+    acceptBtn.textContent = '✓ Accept All';
 
     const revertBtn = document.createElement('button');
     revertBtn.type = 'button';
     revertBtn.className = 'btn-outline btn-sm btn-row-revert';
     revertBtn.dataset.id = row.id;
-    revertBtn.textContent = '↩️ Revert';
+    revertBtn.textContent = '↩️ Revert Row';
 
     btnGroup.append(acceptBtn, revertBtn);
     tdActions.append(btnGroup);
@@ -2469,7 +2717,7 @@ export function renderStep3Table() {
   });
 }
 
-// Step 3 Table Event Delegation (Editing, Accepting, Reverting)
+// Step 3 Table Event Delegation (Editing, Field-level Decisions, Accepting, Reverting)
 const step3Tbody = $('step3TableBody');
 if (step3Tbody) {
   step3Tbody.addEventListener('change', (e) => {
@@ -2481,30 +2729,122 @@ if (step3Tbody) {
       updateRowValue(S.rows, id, field, val);
       renderStep3Table();
       updateSummary();
+      updatePreExportGate();
     }
   });
 
   step3Tbody.addEventListener('click', (e) => {
     const target = e.target;
-    if (target && target.classList.contains('btn-row-accept')) {
+    if (!target) return;
+
+    // 1. Approve proposed price
+    if (target.classList.contains('btn-approve-price')) {
+      const id = target.dataset.id;
+      const row = approvePrice(S.rows, id);
+      if (row) {
+        renderStep3Table();
+        updateSummary();
+        updatePreExportGate();
+        postAiAnnouncement(`✓ Approved price $${row.price} for "${row.current_name}". Ready for Toast.`);
+      }
+      return;
+    }
+
+    // 2. Reject proposed price
+    if (target.classList.contains('btn-reject-price')) {
+      const id = target.dataset.id;
+      const row = rejectPrice(S.rows, id);
+      if (row) {
+        renderStep3Table();
+        updateSummary();
+        updatePreExportGate();
+        postAiAnnouncement(`Kept original price for "${row.current_name}".`);
+      }
+      return;
+    }
+
+    // 3. Field-level accept name
+    if (target.classList.contains('btn-accept-name')) {
+      const id = target.dataset.id;
+      const row = setFieldDecision(S.rows, id, 'name', 'accept');
+      if (row) {
+        renderStep3Table();
+        updateSummary();
+        updatePreExportGate();
+        postAiAnnouncement(`Accepted name "${row.current_name}".`);
+      }
+      return;
+    }
+
+    // 4. Field-level reject name
+    if (target.classList.contains('btn-reject-name')) {
+      const id = target.dataset.id;
+      const row = setFieldDecision(S.rows, id, 'name', 'reject');
+      if (row) {
+        renderStep3Table();
+        updateSummary();
+        updatePreExportGate();
+        postAiAnnouncement(`Rejected name proposal for "${row.current_name}".`);
+      }
+      return;
+    }
+
+    // 5. Field-level accept category
+    if (target.classList.contains('btn-accept-cat')) {
+      const id = target.dataset.id;
+      const row = setFieldDecision(S.rows, id, 'category', 'accept');
+      if (row) {
+        renderStep3Table();
+        updateSummary();
+        updatePreExportGate();
+        postAiAnnouncement(`Accepted category "${row.category}" for "${row.current_name}".`);
+      }
+      return;
+    }
+
+    // 6. Field-level reject category
+    if (target.classList.contains('btn-reject-cat')) {
+      const id = target.dataset.id;
+      const row = setFieldDecision(S.rows, id, 'category', 'reject');
+      if (row) {
+        renderStep3Table();
+        updateSummary();
+        updatePreExportGate();
+        postAiAnnouncement(`Rejected category proposal for "${row.current_name}".`);
+      }
+      return;
+    }
+
+    // 7. Accept all row changes
+    if (target.classList.contains('btn-row-accept')) {
       const id = target.dataset.id;
       const row = S.rows.find((r) => r.id === id);
       if (row) {
         row.decisions.name = 'accept';
         row.decisions.category = 'accept';
         row.decisions.barcode = 'accept';
+        if (row.price_status === 'pending_approval') {
+          approvePrice(S.rows, id);
+        }
         renderStep3Table();
         updateSummary();
-        postAiAnnouncement(`Accepted edits for "${row.current_name}". Barcode mapped for Toast import.`);
+        updatePreExportGate();
+        postAiAnnouncement(`Accepted all edits for "${row.current_name}". Barcode & price mapped for Toast.`);
       }
-    } else if (target && target.classList.contains('btn-row-revert')) {
+      return;
+    }
+
+    // 8. Revert row
+    if (target.classList.contains('btn-row-revert')) {
       const id = target.dataset.id;
       const row = revertRowEdit(S.rows, id);
       if (row) {
         renderStep3Table();
         updateSummary();
+        updatePreExportGate();
         postAiAnnouncement(`Reverted "${row.current_name}" back to original Clover imported values.`);
       }
+      return;
     }
   });
 }
@@ -2521,24 +2861,33 @@ bindClick('btnApproveHighCertainty', () => {
   const count = autoApproveHighCertainty(S.rows);
   renderStep3Table();
   updateSummary();
-  postAiAnnouncement(`⚡ Auto-approved ${count} high-certainty items! Remaining items with ambiguous logic remain flagged for your review.`);
+  updatePreExportGate();
+  postAiAnnouncement(`⚡ Auto-approved ${count} high-certainty items! Remaining items with ambiguous logic or price verification remain flagged.`);
 });
 
 bindClick('btnApproveAllStep3', () => {
+  let pendingPriceCount = 0;
   for (const r of S.rows) {
     r.decisions.name = 'accept';
     r.decisions.category = 'accept';
     r.decisions.barcode = 'accept';
+    if (r.price_status === 'pending_approval') {
+      approvePrice(S.rows, r.id);
+      pendingPriceCount++;
+    }
   }
   renderStep3Table();
   updateSummary();
-  postAiAnnouncement(`✓ Approved all ${S.rows.length} catalog items for Toast POS import.`);
+  updatePreExportGate();
+  const priceMsg = pendingPriceCount > 0 ? ` (approved ${pendingPriceCount} pending prices)` : '';
+  postAiAnnouncement(`✓ Approved all ${S.rows.length} catalog items for Toast POS import${priceMsg}.`);
 });
 
 bindClick('btnRevertAllStep3', () => {
   const count = revertAllEdits(S.rows);
   renderStep3Table();
   updateSummary();
+  updatePreExportGate();
   postAiAnnouncement(`↩️ Reset all ${count} catalog items back to their original Clover imported state.`);
 });
 
@@ -2549,6 +2898,14 @@ bindClick('btnPreviewRetail', () => {
 
 bindClick('btnDlRetail', () => {
   try {
+    const signOff = $('gateSignOffCheckbox');
+    const pricePending = S.rows.filter((r) => r.price_status === 'pending_approval').length;
+    if (pricePending > 0 && (!signOff || !signOff.checked)) {
+      postAiAnnouncement(`⚠️ You have ${pricePending} price changes awaiting approval. Please approve them in Step 3 or check the sign-off box.`);
+      setWizardStep(3);
+      return;
+    }
+
     const dateStr = new Date().toISOString().slice(0, 10);
     const filename = `toast_retail_import_${dateStr}.csv`;
     const toastTable = exportToastRows(S.rows, { format: 'retail', onlyApproved: false, strictBarcodes: true });
@@ -2622,54 +2979,40 @@ async function handleCopilotChat(prompt) {
   const btn = $('btnSendAiChat');
   if (btn) btn.disabled = true;
 
-  const isFormattingIntent = /\b(title\s*case|clean|pack|volume|abbreviation|bottle|size|uppercase|standardize|fix)\b/i.test(cleanPrompt);
-
   try {
-    if (isFormattingIntent && S.records.length > 0) {
-      // Use AI formatting endpoint for batch diff adjustments
-      const payload = {
-        prompt: cleanPrompt,
-        items: prepareDatasetForAi(S.records, S.rows, 150)
-      };
+    const readyCount = S.rows.filter(isApproved).length;
+    const pricePendingCount = S.rows.filter((r) => r.price_status === 'pending_approval').length;
+    const priceMissingCount = S.rows.filter((r) => !r.price || Number(r.price) <= 0).length;
 
-      const res = await fetch('/api/ai/format', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+    // Full catalog context with all fields and diagnostic numbers
+    const allItems = prepareDatasetForAi(S.records, S.rows, 5000);
+    const context = {
+      step: currentWizardStep,
+      totalItems: S.records.length,
+      readyItems: readyCount,
+      pricePendingCount,
+      priceMissingCount,
+      categories: Array.from(new Set(S.rows.map((r) => r.category).filter(Boolean)))
+    };
 
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to process AI request');
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: cleanPrompt, context, items: allItems })
+    });
 
-      appendStreamMessage('assistant', data.message || 'I have analyzed your items and prepared standardizations.');
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to reach Gemini assistant');
 
-      if (data.changes && data.changes.length > 0) {
-        S.currentAiChanges = data.changes;
-        renderDiffSection(data.changes, data.summary);
-      } else {
-        S.currentAiChanges = [];
-        const sec = $('aiDiffSection');
-        setDisplay(sec, 'none');
-      }
+    appendStreamMessage('assistant', data.reply || 'I have analyzed your request.');
+
+    if (data.changes && data.changes.length > 0) {
+      S.currentAiChanges = data.changes;
+      renderDiffSection(data.changes, data.summary || `Gemini proposed adjustments for ${data.changes.length} items`);
     } else {
-      // General conversational copilot guidance
-      const readyCount = S.rows.filter(isApproved).length;
-      const context = {
-        step: currentWizardStep,
-        totalItems: S.records.length,
-        readyItems: readyCount
-      };
-
-      const res = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: cleanPrompt, context })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to reach Gemini assistant');
-
-      appendStreamMessage('assistant', data.reply || 'I am ready to help you optimize your Toast import.');
+      S.currentAiChanges = [];
+      const sec = $('aiDiffSection');
+      setDisplay(sec, 'none');
     }
   } catch (err) {
     appendStreamMessage('assistant', `⚠️ ${err.message || 'Unable to communicate with Gemini.'}`);
@@ -2716,5 +3059,6 @@ bindClick('toggleAiCompanionBtn', () => {
   if (!panel) return;
   panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
 });
+
 
 

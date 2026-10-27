@@ -2,13 +2,22 @@ import { analyzeBarcode } from './barcode.js';
 import { normalizeName, applyApprovedAliases } from './normalization.js';
 import { evaluateCategory } from './categories.js';
 import { chooseReference, detectDuplicates } from './matching.js';
-export const DECISION_FIELDS = ['name', 'barcode', 'category'];
+export const DECISION_FIELDS = ['name', 'barcode', 'category', 'price'];
 
 export function buildRows(records, { index = new Map(), canonical = [], aliases = [] } = {}) {
   const rows = records.map((rec, i) => {
     const barcode = analyzeBarcode(rec.barcode);
     const cats = String(rec.category ?? '');
     const current = String(rec.name ?? '').trim();
+    const rawPrice = rec.price !== undefined && rec.price !== null ? String(rec.price).trim() : '';
+    const rawCost = rec.cost !== undefined && rec.cost !== null ? String(rec.cost).trim() : '';
+    const numPrice = Number(rawPrice);
+    const numCost = Number(rawCost);
+    const isPriceMissing = !rawPrice || isNaN(numPrice) || numPrice <= 0;
+    const margin = (!isPriceMissing && !isNaN(numCost) && numCost > 0)
+      ? (((numPrice - numCost) / numPrice) * 100).toFixed(1)
+      : null;
+
     const row = {
       id: `r${i + 1}`,
       original_name: rec.name ?? '',
@@ -16,15 +25,24 @@ export function buildRows(records, { index = new Map(), canonical = [], aliases 
       barcode,
       category: cats,
       existingCategories: cats.split(',').map((s) => s.trim()).filter(Boolean),
-      price: rec.price ?? '',
-      cost: rec.cost ?? '',
+      price: rawPrice,
+      cost: rawCost,
+      margin,
+      price_status: isPriceMissing ? 'missing' : 'verified',
+      proposed_price: null,
+      price_proposal_reason: null,
       brand: rec.brand ?? '',
       unit: rec.unit ?? '',
       supplier: rec.supplier ?? '',
       supplierItemId: rec.supplierItemId ?? '',
       description: rec.description ?? '',
       record: rec,
-      decisions: { name: 'pending', barcode: 'pending', category: 'pending' }
+      decisions: {
+        name: 'pending',
+        barcode: 'pending',
+        category: 'pending',
+        price: isPriceMissing ? 'pending' : 'accept'
+      }
     };
     row.reference = chooseReference(row, index);
     const norm = applyApprovedAliases(normalizeName(current), aliases);
@@ -39,11 +57,81 @@ export function buildRows(records, { index = new Map(), canonical = [], aliases 
   for (const r of rows) r.duplicate = !!(r.barcode.canonicalKey && dups.get(r.barcode.canonicalKey) > 1);
   return rows;
 }
+
 export function setDecision(rows, id, field, value) {
   if (!DECISION_FIELDS.includes(field) || !['pending', 'accept', 'reject'].includes(value)) throw new Error('Invalid decision');
   const row = rows.find((r) => r.id === id); if (!row) throw new Error('Unknown row');
   row.decisions[field] = value; return row;
 }
+
+export function setFieldDecision(rows, id, field, decision) {
+  const row = rows.find((r) => r.id === id);
+  if (!row) return null;
+  if (!['accept', 'reject', 'pending'].includes(decision)) throw new Error('Invalid decision');
+
+  if (field === 'name') {
+    row.decisions.name = decision;
+    if (decision === 'accept' && row.proposed_name) {
+      row.current_name = row.proposed_name;
+    } else if (decision === 'reject') {
+      row.proposed_name = '';
+    }
+  } else if (field === 'category') {
+    row.decisions.category = decision;
+    if (decision === 'accept' && row.proposed_category) {
+      row.category = row.proposed_category;
+    } else if (decision === 'reject') {
+      row.proposed_category = '';
+    }
+  } else if (field === 'barcode') {
+    row.decisions.barcode = decision;
+  } else if (field === 'price') {
+    if (decision === 'accept') {
+      return approvePrice(rows, id);
+    } else if (decision === 'reject') {
+      return rejectPrice(rows, id);
+    } else {
+      row.decisions.price = 'pending';
+    }
+  }
+  row.manuallyEdited = true;
+  return row;
+}
+
+export function approvePrice(rows, id) {
+  const row = rows.find((r) => r.id === id);
+  if (!row) return null;
+  if (row.proposed_price !== null && row.proposed_price !== undefined) {
+    row.price = String(row.proposed_price).trim();
+    if (row.record) row.record.price = row.price;
+  }
+  row.price_status = 'verified';
+  row.proposed_price = null;
+  row.price_proposal_reason = null;
+  row.decisions.price = 'accept';
+  row.manuallyEdited = true;
+
+  const numPrice = Number(row.price);
+  const numCost = Number(row.cost);
+  row.margin = (!isNaN(numPrice) && numPrice > 0 && !isNaN(numCost) && numCost > 0)
+    ? (((numPrice - numCost) / numPrice) * 100).toFixed(1)
+    : null;
+
+  return row;
+}
+
+export function rejectPrice(rows, id) {
+  const row = rows.find((r) => r.id === id);
+  if (!row) return null;
+  row.proposed_price = null;
+  row.price_proposal_reason = null;
+  const numPrice = Number(row.price);
+  row.price_status = (!row.price || isNaN(numPrice) || numPrice <= 0) ? 'missing' : 'verified';
+  row.decisions.price = row.price_status === 'missing' ? 'pending' : 'accept';
+  row.manuallyEdited = true;
+  return row;
+}
+
 export function applyOffSuggestions(rows) {
   for (const r of rows) {
     if (r.off_suggestion && !r.proposed_name && r.off_agrees) { r.proposed_name = r.off_suggestion; r.name_source = 'open_food_facts (crowd-sourced, unverified)'; }
@@ -65,11 +153,12 @@ export function finalValues(r) {
     category: r.decisions.category === 'accept' && r.proposed_category ? r.proposed_category : r.category
   };
 }
-// Strict: every proposal decided, barcode explicitly accepted, no unresolved contradictions.
+// Strict: every proposal decided, barcode explicitly accepted, no unresolved contradictions, no unapproved price proposals.
 export function isApproved(r) {
   if (r.decisions.barcode !== 'accept') return false;
   if (r.proposed_name && r.decisions.name === 'pending') return false;
   if (r.proposed_category && r.decisions.category === 'pending') return false;
+  if (r.price_status === 'pending_approval' || (r.proposed_price !== null && r.proposed_price !== undefined)) return false;
   if (r.reference.status === 'conflicting-references') return false;
   if (r.reference.status === 'contradiction' && r.decisions.name === 'pending') return false;
   return true;
@@ -95,7 +184,7 @@ export function loadSession(rows, json) {
 
 /**
  * Evaluates row edit certainty. Flagged if the edit logic is uncertain,
- * ambiguous, has check digit anomalies, reference contradictions, or duplicate barcodes.
+ * ambiguous, has check digit anomalies, reference contradictions, missing price, or price pending approval.
  */
 export function computeRowCertainty(r) {
   const reasons = [];
@@ -121,8 +210,19 @@ export function computeRowCertainty(r) {
     reasons.push(`Category conflict: ${r.category_conflicts.join(', ')}`);
   }
 
-  if (!r.price || r.price === '0' || r.price === '0.00') {
-    reasons.push('Price is 0 or missing');
+  const numPrice = Number(r.price);
+  if (!r.price || isNaN(numPrice) || numPrice <= 0) {
+    isUncertain = true;
+    reasons.push('Selling price is missing or $0.00 - Toast POS requires active pricing');
+  } else if (r.price_status === 'pending_approval') {
+    isUncertain = true;
+    reasons.push(`Proposed price adjustment ($${r.proposed_price || ''}) requires manual approval`);
+  } else if (r.cost && numPrice > 0) {
+    const numCost = Number(r.cost);
+    if (!isNaN(numCost) && numCost > 0 && numPrice < numCost) {
+      isUncertain = true;
+      reasons.push(`Negative margin: Price ($${r.price}) is below wholesale cost ($${r.cost})`);
+    }
   }
 
   const iss = issues(r);
