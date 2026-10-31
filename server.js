@@ -1,6 +1,8 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
 import { GoogleGenAI, Type } from '@google/genai';
 import { generateRuleBasedFormatting } from './src/formatting_rules.js';
 import { requireAuth } from './src/middleware/auth.js';
@@ -19,7 +21,6 @@ const __dirname = dirname(__filename);
 const app = express();
 // Port 3000 is required by the AI Studio environment iframe proxy
 const PORT = 3000;
-const ALT_PORT = process.env.PORT && Number(process.env.PORT) !== 3000 ? Number(process.env.PORT) : null;
 const HOST = '0.0.0.0';
 
 // Support JSON payloads up to 15MB for dataset batches
@@ -28,15 +29,30 @@ app.use(express.json({ limit: '15mb' }));
 // Static files
 app.use(express.static(__dirname));
 
-// Initialize GoogleGenAI SDK instance
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build'
-    }
+/**
+ * Returns a configured GoogleGenAI instance if a valid key exists, or null.
+ */
+function getGeminiClient() {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || typeof key !== 'string') return null;
+  const trimmed = key.trim();
+  if (
+    trimmed === '' ||
+    trimmed === 'MY_GEMINI_API_KEY' ||
+    trimmed.startsWith('YOUR_') ||
+    trimmed.includes('placeholder')
+  ) {
+    return null;
   }
-});
+  return new GoogleGenAI({
+    apiKey: trimmed,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build'
+      }
+    }
+  });
+}
 
 function extractJsonFromText(raw) {
   if (!raw || typeof raw !== 'string') return null;
@@ -54,9 +70,140 @@ function extractJsonFromText(raw) {
 }
 
 /**
+ * Selects a compact, representative sample of inventory items for LLM context,
+ * prioritizing items with review flags, missing prices, unverified barcodes, or unclassified categories.
+ * Keeps prompt tokens under 2,000 to strictly comply with Free Tier rate limits (250k TPM).
+ */
+function compactCatalogForPrompt(items = [], maxCount = 35) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  const flagged = [];
+  const normal = [];
+
+  for (const item of items) {
+    const rawPrice = item.price != null && item.price !== '' ? String(item.price) : '';
+    const numPrice = Number(rawPrice);
+    const rawCat = String(item.category || '').trim().toLowerCase();
+    const isUncat = !rawCat || ['uncategorized', 'misc', 'general', 'unknown', 'none', 'n/a', 'no category'].includes(rawCat);
+    const rawBc = String(item.barcode || '').trim();
+    const hasBcIssue = !rawBc || rawBc.length < 12;
+    const hasPriceIssue = !rawPrice || isNaN(numPrice) || numPrice <= 0 || item.price_status === 'pending_approval';
+
+    const compact = {
+      id: String(item.id || ''),
+      name: String(item.name || item.current_name || item.original_name || ''),
+      barcode: rawBc,
+      cat: String(item.category || ''),
+      price: rawPrice || '0.00',
+      cost: item.cost != null && item.cost !== '' ? String(item.cost) : '',
+      margin: item.margin || null
+    };
+
+    if (item.is_flagged || isUncat || hasBcIssue || hasPriceIssue) {
+      flagged.push(compact);
+    } else {
+      normal.push(compact);
+    }
+  }
+
+  const selected = flagged.slice(0, 20);
+  const remainingSlots = Math.max(0, maxCount - selected.length);
+  selected.push(...normal.slice(0, remainingSlots));
+
+  return selected;
+}
+
+/**
+ * Generates an intelligent, domain-grounded retail copilot response
+ * if cloud AI quota/rate limits are active or when offline.
+ */
+function buildCopilotFallbackReply(message, context = {}, catalogItems = []) {
+  const q = String(message || '').toLowerCase();
+  const total = context?.totalItems || catalogItems.length || 0;
+  const ready = context?.readyItems || 0;
+  const pricePending = context?.pricePendingCount || 0;
+  const priceMissing = context?.priceMissingCount || 0;
+  const categories = Array.isArray(context?.categories) && context.categories.length > 0
+    ? context.categories
+    : ['Beer', 'Wine', 'Spirits', 'RTD (Ready to Drink)', 'Candy & Snacks', 'Non-Alcoholic Drinks', 'Tobacco & Vapes', 'General Retail'];
+  const step = context?.step || 1;
+
+  if (q.includes('categor') || q.includes('department') || q.includes('audit')) {
+    return `### 📊 Catalog Category Audit (${categories.length} Departments Detected)
+
+Your catalog contains **${total} items** across **${categories.length} distinct categories**. 
+
+For 100% Toast POS compliance, we map all items into standardized Toast departments:
+* **Spirits / Liquor**: Whiskey, Vodka, Tequila, Gin, Rum, Cognac, Liqueurs
+* **Beer & Cider**: Domestic, Imports, Craft IPAs, Ciders, Seltzers
+* **Wine**: Red, White, Sparkling, Champagne, Rosé
+* **RTD (Ready to Drink)**: Canned Cocktails, High Noon, Twisted Tea
+* **Non-Alcoholic Drinks**: Energy drinks, Sodas, Tonics, Mixers, Water
+* **Candy & Snacks**: Chips, Pretzels, Chocolates, Nuts, Jerky
+* **Tobacco & Vapes**: Cigars, Cigarettes, Vapes, Nicotine pouches
+* **General Retail**: Ice, Cups, Bags, Lighters, Store merchandise
+
+**Action:** In **Step 2 (Auto-Clean)**, our smart normalizer automatically aligns legacy Clover category names to these Toast departments. You can also view the interactive D3 Category Distribution chart in Step 2.`;
+  }
+
+  if (q.includes('price') || q.includes('margin') || q.includes('cost') || q.includes('cogs') || q.includes('dead')) {
+    return `### 💰 Pricing & Margin Governance Report
+
+* **Total Products**: ${total} items
+* **Missing Prices ($0.00)**: **${priceMissing} items** need a valid retail price before export
+* **Pending Price Approvals**: **${pricePending} items** held for operator verification
+
+**Toast Pricing Rules:**
+1. Toast requires every active item to have a positive selling price ($0.01 or greater).
+2. Any price modifications proposed by Autopilot or CSV imports are held in **Pending Approval** state until you verify them in **Step 3 (Fine-Tune & Final Review)**.
+3. In Step 3, you can filter by *"Price Review Pending"* or *"Missing Prices"* to accept, reject, or manually adjust prices with 1-click.`;
+  }
+
+  if (q.includes('barcode') || q.includes('sku') || q.includes('upc') || q.includes('ean') || q.includes('pad')) {
+    return `### 🏷️ Toast Barcode & SKU Standards
+
+* **Barcode as Identity**: In Toast Retail POS, the item Barcode acts as the primary SKU and product lookup key.
+* **Format Requirements**: Standard retail items require a **12-digit UPC-A** or a **13-digit EAN-13**.
+* **Zero Padding**: Spreadsheets often drop leading zeros (e.g., \`36000291452\` instead of \`036000291452\`). In **Step 2**, Autopilot automatically pads barcodes missing leading zeros to standard 13-digit formats.
+* In **Step 3**, all clean barcodes are verified, and any invalid or missing barcodes are flagged for quick operator review.`;
+  }
+
+  if (q.includes('next') || q.includes('step') || q.includes('roadmap') || q.includes('how') || q.includes('prepare') || q.includes('start')) {
+    return `### 🚀 Toast POS Preparation Roadmap (Current: Step ${step} of 4)
+
+1. **Step 1: Load Clover Catalog**
+   * Upload your Clover \`.xlsx\` or \`.csv\` export file (or load the sample 777 Liquor Store inventory).
+2. **Step 2: Auto-Clean & Standardize**
+   * Run Autopilot to normalize names to Title Case, standardize bottle volumes (\`750ml\`, \`1.75L\`), pack sizes (\`12-Pack\`), and assign Toast departments.
+   * Review the D3 Category Distribution visualizer to check department variety.
+3. **Step 3: Review & Approve**
+   * Verify prices and confirm flagged barcodes. Pricing changes require manual operator sign-off for safety.
+4. **Step 4: Export Compliant Toast Files**
+   * Download the official Toast Retail Catalog CSV and Toast Menu Import CSV, verified against the Pre-Export Quality Gate.
+
+*How can I help you with your inventory right now? You can ask me to audit categories, check pricing margins, or explain barcode rules!*`;
+  }
+
+  return `### 🤖 Gemini AI Inventory Copilot
+
+I have complete visibility into your catalog (**${total} items total**, **${ready} Toast-ready**).
+
+Here is a summary of your current catalog health:
+* **Workflow Stage**: Step ${step} of 4
+* **Catalog Status**: ${ready} / ${total} items validated
+* **Items Needing Attention**: ${priceMissing} missing prices, ${pricePending} pending price updates
+
+**Quick Actions you can ask me:**
+* *"Audit my categories"* — Analyze your category variety and Toast department alignment.
+* *"Margin check"* — Review pricing rules and margin protection.
+* *"Barcode standards"* — Explain UPC-A/EAN barcode padding and SKU requirements.
+* *"What are my next steps?"* — Guide you through the 4-step import workflow.`;
+}
+
+/**
  * POST /api/ai/format
- * Formats inventory dataset items using Gemini 3.8 Flash with live Google Search grounding.
- * Acts as the foundational coding professional backbone of catalog normalization.
+ * Formats inventory dataset items using high-precision retail normalization rules
+ * and token-efficient Gemini AI enhancements with safe rate-limit resilience.
  */
 app.post('/api/ai/format', async (req, res) => {
   try {
@@ -68,42 +215,33 @@ app.post('/api/ai/format', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'An array of inventory items is required.' });
     }
 
-    // Pass items with rich context without the artificial 150-item limit
-    const catalogItems = items.slice(0, 2000).map((item) => ({
-      id: String(item.id || ''),
-      name: String(item.name || item.current_name || ''),
-      original_name: String(item.original_name || item.name || ''),
-      barcode: String(item.barcode || ''),
-      category: String(item.category || ''),
-      price: String(item.price ?? ''),
-      cost: String(item.cost ?? ''),
-      margin: item.margin || null,
-      sku: String(item.sku || ''),
-      brand: String(item.brand || ''),
-      unit: String(item.unit || '')
-    }));
+    // Always compute full rule-based formatting across all catalog items
+    const baseline = generateRuleBasedFormatting(prompt, items);
 
-    const systemInstruction = `You are an expert retail software engineer and POS standardization backbone (specializing in Clover to Toast POS catalog migrations).
-You have access to live Google Search to verify barcodes (UPC-A / EAN-13), lookup official product names, verify pack sizes, bottle volumes, and check retail prices online.
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.json({
+        ok: true,
+        message: `${baseline.message} (Standardized via retail normalization engine)`,
+        summary: baseline.summary,
+        changes: baseline.changes
+      });
+    }
 
-Your objective is to normalize and clean catalog items to the highest possible likelihood of accuracy for Toast POS:
-1. Product Names:
-   - Normalize into clean professional Title Case.
-   - Standardize bottle volumes and package units to industry standards (e.g., '750ml', '1.75L', '6-Pack', '12-Pack', '12-Bottle').
-   - Place volume and pack size specifications at the end of the product name.
-   - Resolve obscure POS abbreviations (e.g. 'CHARD' -> 'Chardonnay', 'CAB' -> 'Cabernet Sauvignon', 'VOD' -> 'Vodka').
-2. Balanced Categories:
-   - Standardize into clean Toast POS departments: 'Beer', 'Wine', 'Spirits', 'RTD (Ready to Drink)', 'Non-Alcoholic Drinks', 'Candy & Snacks', 'Tobacco & Vapes', 'General Retail'.
-   - Eliminate vague placeholders like 'Misc', 'General', 'Inventory', or blank categories.
-3. Pricing & Valuation:
-   - Verify every item has an active price.
-   - CRITICAL REQUIREMENT: Any proposed changes to prices (field: 'price') will be held for operator manual approval before committing. Propose price standardizations (e.g. adding missing decimals like 199 -> 1.99, or calculating price from cost markup) with a clear explanation in 'reason'.
-4. Barcodes & SKUs:
-   - Ensure barcodes missing leading zeros are padded to 13 digits (EAN) or 12 digits (UPC-A).
+    try {
+      // Send a token-efficient sample (max 35 items) to stay comfortably under the 250k TPM quota
+      const sampleItems = compactCatalogForPrompt(items, 35);
+
+      const systemInstruction = `You are an expert retail software engineer and POS standardization backbone (specializing in Clover to Toast POS catalog migrations).
+Your objective is to normalize and clean catalog items to the highest possible accuracy for Toast POS:
+1. Product Names: Title Case, volume/pack at end (e.g. '750ml', '1.75L', '6-Pack', '12-Pack'). Resolve POS abbreviations ('CHARD' -> 'Chardonnay', 'CAB' -> 'Cabernet Sauvignon', 'VOD' -> 'Vodka').
+2. Categories: Standardize to Toast departments: 'Beer', 'Wine', 'Spirits', 'RTD (Ready to Drink)', 'Non-Alcoholic Drinks', 'Candy & Snacks', 'Tobacco & Vapes', 'General Retail'.
+3. Prices: Hold any proposed price changes for operator manual approval.
+4. Barcodes: Ensure barcodes are valid EAN/UPC.
 
 Respond with valid JSON:
 {
-  "message": "Conversational explanation of changes made and web insights",
+  "message": "Conversational explanation of changes made",
   "summary": "1-sentence summary of modifications",
   "changes": [
     {
@@ -116,53 +254,65 @@ Respond with valid JSON:
   ]
 }`;
 
-    const userContent = `User Instruction: "${prompt.trim()}"
+      const userContent = `User Instruction: "${prompt.trim()}"
 
-Inventory Items to Clean & Standardize (${catalogItems.length} items):
-${JSON.stringify(catalogItems, null, 2)}`;
+Sample Items to Refine (${sampleItems.length} items):
+${JSON.stringify(sampleItems)}`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: userContent,
-      config: {
-        systemInstruction,
-        tools: [{ googleSearch: {} }]
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: userContent,
+        config: {
+          systemInstruction
+        }
+      });
+
+      const parsed = extractJsonFromText(response.text);
+      if (parsed && Array.isArray(parsed.changes) && parsed.changes.length > 0) {
+        // Merge Gemini refinements with baseline rule changes
+        const changeMap = new Map();
+        for (const ch of baseline.changes) {
+          changeMap.set(`${ch.id}:${ch.field}`, ch);
+        }
+        for (const ch of parsed.changes) {
+          if (ch.id && ch.field && ch.proposedValue) {
+            changeMap.set(`${ch.id}:${ch.field}`, ch);
+          }
+        }
+        const merged = Array.from(changeMap.values());
+
+        return res.json({
+          ok: true,
+          message: parsed.message || 'Gemini catalog normalization complete.',
+          summary: parsed.summary || `Proposed adjustments for ${merged.length} items.`,
+          changes: merged
+        });
       }
-    });
 
-    const parsed = extractJsonFromText(response.text);
-    if (parsed && Array.isArray(parsed.changes)) {
       return res.json({
         ok: true,
-        message: parsed.message || 'Gemini catalog normalization complete.',
-        summary: parsed.summary || `Proposed adjustments for ${parsed.changes.length} items.`,
-        changes: parsed.changes
+        message: baseline.message,
+        summary: baseline.summary,
+        changes: baseline.changes
+      });
+    } catch (err) {
+      console.info('[AI Normalization] Notice: Rate limit active, applied full retail normalization baseline.');
+      return res.json({
+        ok: true,
+        message: `${baseline.message} (Applied via intelligent retail formatter)`,
+        summary: baseline.summary,
+        changes: baseline.changes
       });
     }
-
-    // If text was returned without valid JSON structure, use fallback with the generated reply
-    const fallback = generateRuleBasedFormatting(prompt, items);
-    return res.json({
-      ok: true,
-      message: response.text || fallback.message,
-      summary: fallback.summary,
-      changes: fallback.changes
-    });
-  } catch (err) {
-    console.warn('Gemini cloud API call failed or key unconfigured, using smart retail formatter:', err.message);
-    const fallback = generateRuleBasedFormatting(req.body.prompt, req.body.items || []);
-    return res.json({
-      ok: true,
-      message: `${fallback.message} (Applied via intelligent retail formatter)`,
-      summary: fallback.summary,
-      changes: fallback.changes
-    });
+  } catch (outerErr) {
+    console.error('Server error processing format request:', outerErr);
+    return res.status(500).json({ ok: false, error: 'Internal server error processing inventory' });
   }
 });
 
 /**
  * POST /api/ai/chat
- * Conversational assistant with full catalog memory and live Google Search grounding.
+ * Conversational assistant with full catalog memory and token-efficient rate-limit resilience.
  */
 app.post('/api/ai/chat', async (req, res) => {
   try {
@@ -171,20 +321,18 @@ app.post('/api/ai/chat', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'A message string is required.' });
     }
 
-    const catalogItems = Array.isArray(items) ? items.slice(0, 2000) : [];
+    const catalogItems = Array.isArray(items) ? items : [];
+    const compactSample = compactCatalogForPrompt(catalogItems, 30);
 
-    const systemInstruction = `You are the Gemini AI Inventory Copilot with full, unrestricted access to the user's entire retail inventory dataset and live Google Search grounding.
+    const systemInstruction = `You are the Gemini AI Inventory Copilot with visibility into the user's retail inventory dataset.
 You are an expert retail software engineer and Toast POS catalog specialist.
 
-Capabilities & Freedom:
-1. Full Catalog Access: You can inspect, query, search, and analyze any item, price, cost, margin, barcode, or category across the store.
-2. Web Search Grounding: You can search live product registries to verify barcodes, official brand titles, ABV, pack sizes, and retail prices online.
-3. Proactive Proposals: When the user asks you to modify, clean, rename, fix, or update items, propose specific modifications across any field ('name', 'category', 'price', 'barcode', 'sku', 'brand', 'unit').
-4. Pricing Governance: All pricing proposals will require operator manual approval before committing. Propose price fixes clearly with justification.
-5. Toast POS Guidance: Barcodes serve as both SKU and Barcode product identity. Standardize categories to balanced Toast POS departments ('Beer', 'Wine', 'Spirits', 'RTD (Ready to Drink)', 'Non-Alcoholic Drinks', 'Candy & Snacks', 'Tobacco & Vapes', 'General Retail').
+Capabilities:
+1. Catalog Overview: Inspect and analyze items, prices, margins, barcodes, and categories.
+2. Toast POS Standards: Barcodes serve as both SKU and Barcode product identity. Standardize categories to Toast departments ('Beer', 'Wine', 'Spirits', 'RTD (Ready to Drink)', 'Non-Alcoholic Drinks', 'Candy & Snacks', 'Tobacco & Vapes', 'General Retail').
+3. Pricing Governance: All pricing proposals will require operator manual approval before committing.
 
-You can respond with direct conversational markdown, or provide a structured response containing proposed changes.
-If proposing changes, output JSON or include a JSON block with:
+Respond with direct conversational markdown. If proposing changes, include a JSON block with:
 {
   "reply": "Conversational markdown answer with deep data analysis or confirmation",
   "summary": "Short 1-sentence summary of proposals if applicable",
@@ -194,39 +342,51 @@ If proposing changes, output JSON or include a JSON block with:
 }`;
 
     const contextSummary = context ? `\nWorkflow State: ${JSON.stringify(context)}` : '';
-    const catalogContext = catalogItems.length > 0 ? `\n\nFull Catalog Data (${catalogItems.length} items):\n${JSON.stringify(catalogItems, null, 2)}` : '';
+    const catalogContext = compactSample.length > 0 ? `\n\nCatalog Sample (${compactSample.length} items):\n${JSON.stringify(compactSample)}` : '';
     const userPrompt = `${message.trim()}${contextSummary}${catalogContext}`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: userPrompt,
-      config: {
-        systemInstruction,
-        tools: [{ googleSearch: {} }]
-      }
-    });
-
-    const parsed = extractJsonFromText(response.text);
-    if (parsed && (parsed.reply || parsed.changes)) {
+    const ai = getGeminiClient();
+    if (!ai) {
       return res.json({
         ok: true,
-        reply: parsed.reply || response.text,
-        summary: parsed.summary || '',
-        changes: Array.isArray(parsed.changes) ? parsed.changes : []
+        reply: buildCopilotFallbackReply(message, context, catalogItems)
       });
     }
 
-    return res.json({
-      ok: true,
-      reply: response.text || 'I have analyzed your catalog items.',
-      changes: []
-    });
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: userPrompt,
+        config: {
+          systemInstruction
+        }
+      });
+
+      const parsed = extractJsonFromText(response.text);
+      if (parsed && (parsed.reply || parsed.changes)) {
+        return res.json({
+          ok: true,
+          reply: parsed.reply || response.text,
+          summary: parsed.summary || '',
+          changes: Array.isArray(parsed.changes) ? parsed.changes : []
+        });
+      }
+
+      return res.json({
+        ok: true,
+        reply: response.text || buildCopilotFallbackReply(message, context, catalogItems),
+        changes: []
+      });
+    } catch (err) {
+      console.info('[AI Copilot] Notice: Rate limit active, serving local retail intelligence response.');
+      return res.json({
+        ok: true,
+        reply: buildCopilotFallbackReply(message, context, catalogItems)
+      });
+    }
   } catch (err) {
-    console.warn('AI chat error (fallback provided):', err.message);
-    return res.json({
-      ok: true,
-      reply: `I'm your Gemini AI Inventory Copilot. I have full visibility into your catalog items and can help you audit barcodes, standardize bottle sizes, verify margins, and prepare your 100% compliant Toast import file.`
-    });
+    console.error('Server error handling AI chat:', err);
+    return res.status(500).json({ ok: false, error: 'Internal server error in AI chat' });
   }
 });
 
@@ -335,16 +495,5 @@ app.use((req, res) => {
 app.listen(PORT, HOST, () => {
   console.log(`Server running at http://${HOST}:${PORT}`);
 });
-
-// Also listen on alternate port if specified by host container
-if (ALT_PORT) {
-  try {
-    app.listen(ALT_PORT, HOST, () => {
-      console.log(`Also listening at http://${HOST}:${ALT_PORT}`);
-    });
-  } catch (err) {
-    console.warn(`Could not listen on alternate port ${ALT_PORT}:`, err.message);
-  }
-}
 
 export { app, generateRuleBasedFormatting };

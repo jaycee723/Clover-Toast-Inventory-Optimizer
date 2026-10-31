@@ -8,6 +8,14 @@
   <meta property="og:title" content="Clover to Toast Retail Import Studio">
   <meta property="og:description" content="Turn messy Clover POS spreadsheets into 100% compliant Toast import files and consultant templates.">
   <link rel="stylesheet" href="style.css">
+  <script src="/node_modules/d3/dist/d3.min.js"></script>
+  <script>
+    if (typeof window.d3 === 'undefined') {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/d3@7';
+      document.head.appendChild(s);
+    }
+  </script>
   <script type="importmap">
   {
     "imports": {
@@ -138,6 +146,94 @@
           <p class="wizard-pane-desc">
             Single-click autopilot normalizes brand casing, standardizes packaging (e.g. <code>12PK</code> → <code>12-Pack</code>, <code>750ML</code> → <code>750 mL</code>), and auto-pads barcodes missing leading zeros to standard 13-digit EANs.
           </p>
+        </div>
+
+        <!-- Step 2 Visual Summary: Imported Clover Category Distribution -->
+        <div id="step2CategoryVisualSummary" class="category-summary-card">
+          <div class="category-summary-header">
+            <div class="category-summary-title-group">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span class="category-summary-icon">📊</span>
+                <h3 class="category-summary-title">Imported Clover Category Distribution</h3>
+                <span class="ai-badge" style="background:#0284c7;color:#fff;">D3 Analytics</span>
+                <span id="catVarietyBadge" class="status-pill" style="font-size:11px;color:#38bdf8;border-color:#0284c7;">Analyzing…</span>
+              </div>
+              <p class="category-summary-desc">
+                Visual distribution of product categories found in the imported Clover inventory. Review variety, volume concentration, and Toast department alignment before executing catalog cleaning.
+              </p>
+            </div>
+
+            <!-- Visualization Controls -->
+            <div class="category-summary-controls">
+              <div class="category-view-toggle" role="group" aria-label="Distribution Chart View">
+                <button id="btnCatChartBars" type="button" class="btn-chart-toggle active" title="Horizontal bar distribution">
+                  <span>📊 Bars</span>
+                </button>
+                <button id="btnCatChartDonut" type="button" class="btn-chart-toggle" title="Proportional donut chart">
+                  <span>🍩 Donut</span>
+                </button>
+              </div>
+
+              <select id="catSortSelect" class="category-sort-select" aria-label="Sort categories">
+                <option value="count_desc">Sort: Highest Count</option>
+                <option value="alpha_asc">Sort: A-Z (Alphabetical)</option>
+                <option value="count_asc">Sort: Lowest Count</option>
+              </select>
+
+              <input id="catSearchInput" type="search" placeholder="Filter categories…" class="category-search-input" aria-label="Filter categories">
+            </div>
+          </div>
+
+          <!-- Key Variety Metrics Grid -->
+          <div class="category-metrics-grid">
+            <div class="category-metric-box">
+              <span class="category-metric-label">Total Products</span>
+              <span id="catMetricTotalItems" class="category-metric-value" style="color:#60a5fa;">0</span>
+              <span class="category-metric-sub">Imported records</span>
+            </div>
+            <div class="category-metric-box">
+              <span class="category-metric-label">Unique Categories</span>
+              <span id="catMetricUniqueCategories" class="category-metric-value" style="color:#34d399;">0</span>
+              <span id="catMetricVarietyText" class="category-metric-sub">Variety index: —</span>
+            </div>
+            <div class="category-metric-box">
+              <span class="category-metric-label">Top Category</span>
+              <span id="catMetricTopCategory" class="category-metric-value" style="color:#a78bfa;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">None</span>
+              <span id="catMetricTopCatShare" class="category-metric-sub">0% of catalog</span>
+            </div>
+            <div class="category-metric-box">
+              <span class="category-metric-label">Uncategorized Items</span>
+              <span id="catMetricUncategorized" class="category-metric-value" style="color:#fbbf24;">0</span>
+              <span id="catMetricUncatSub" class="category-metric-sub">All items categorized</span>
+            </div>
+          </div>
+
+          <!-- Dynamic Analytical Insight Banner -->
+          <div id="catInsightBanner" class="category-insight-banner">
+            <span class="insight-icon">💡</span>
+            <span id="catInsightText">Loading category analytics…</span>
+          </div>
+
+          <!-- Chart Canvas Container -->
+          <div class="category-chart-wrapper">
+            <div id="step2CategoryChartContainer" class="category-chart-svg-container"></div>
+            <!-- Floating D3 Tooltip -->
+            <div id="catD3Tooltip" class="cat-d3-tooltip" style="display:none;opacity:0;"></div>
+          </div>
+
+          <!-- Interactive Category Drill-down Drawer / List (when operator clicks a bar) -->
+          <div id="categoryDrilldownPanel" class="category-drilldown-panel" style="display:none;">
+            <div class="category-drilldown-header">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="status-pill" id="drilldownBadge" style="color:#38bdf8;border-color:#0284c7;">Selected Category</span>
+                <strong id="drilldownCategoryName" style="color:#f8fafc;font-size:14px;">Spirits - Vodka</strong>
+                <span id="drilldownCount" class="small text-muted">(0 items)</span>
+                <span id="drilldownToastMapping" class="small ok" style="margin-left:6px;">Maps to Toast: Liquor / Spirits</span>
+              </div>
+              <button id="btnCloseDrilldown" type="button" class="btn-outline btn-sm">✕ Close Filter</button>
+            </div>
+            <div id="drilldownItemsList" class="category-drilldown-items-list"></div>
+          </div>
         </div>
 
         <div style="background:#1e1b4b;border:1px solid #4338ca;border-radius:10px;padding:20px;margin-bottom:18px;">

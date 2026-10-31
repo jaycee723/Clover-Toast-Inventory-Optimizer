@@ -74,6 +74,13 @@ import {
   applyAiChanges,
   revertAiChanges
 } from './src/ai_assistant.js';
+import {
+  computeCategoryDistribution,
+  renderD3CategoryChart,
+  sortDistribution,
+  filterDistribution,
+  generateCategoryInsight
+} from './src/category_distribution.js';
 
 const $ = (id) => (typeof document !== 'undefined' && document.getElementById ? document.getElementById(id) : null);
 const bindClick = (id, fn) => {
@@ -263,6 +270,9 @@ function rebuild(keepDecisions = true) {
   if (old) loadSession(S.rows, old);
   applyOffSuggestions(S.rows);
   render();
+  if (typeof updateStep2CategoryVisualSummary === 'function' && currentWizardStep === 2) {
+    updateStep2CategoryVisualSummary();
+  }
 }
 function filtered() {
   const f = S.filter;
@@ -434,6 +444,7 @@ bindClick('load', async () => {
     S.canonical = p.canonical;
     S.page = 1;
     rebuild(false);
+    updateStep2CategoryVisualSummary();
     // Intelligent scan for inventory spelling and abbreviation improvements
     currentSuggestions = scanInventoryForSpellingSuggestions(S.records, S.aliases);
     renderSuggestions();
@@ -2190,7 +2201,9 @@ export function setWizardStep(stepNum) {
     }
   }
 
-  if (stepNum === 3) {
+  if (stepNum === 2) {
+    updateStep2CategoryVisualSummary();
+  } else if (stepNum === 3) {
     renderStep3Table();
   } else if (stepNum === 4) {
     updatePreExportGate();
@@ -2240,6 +2253,175 @@ export function updatePreExportGate() {
   }
 }
 
+// ============================================================================
+// STEP 2 VISUAL SUMMARY & D3 CATEGORY DISTRIBUTION ENGINE
+// ============================================================================
+
+export const categoryViewState = {
+  view: 'bar', // 'bar' | 'donut'
+  sortBy: 'count_desc',
+  searchQuery: '',
+  selectedCategory: null
+};
+
+/**
+ * Updates the Step 2 visual summary metrics and renders the interactive D3 distribution chart.
+ */
+export function updateStep2CategoryVisualSummary() {
+  const container = $('step2CategoryChartContainer');
+  const dataset = (S.records && S.records.length > 0) ? S.records : (S.rows && S.rows.length > 0 ? S.rows : []);
+  const dist = computeCategoryDistribution(dataset);
+
+  setText('catMetricTotalItems', String(dist.totalItems));
+  setText('catMetricUniqueCategories', String(dist.uniqueCategoryCount));
+  setText('catMetricVarietyText', `Variety index: ${dist.varietyRating}`);
+  setText('catMetricTopCategory', dist.topCategory ? dist.topCategory.name : 'None');
+  setText('catMetricTopCatShare', dist.topCategory ? `${dist.topCategory.count} items (${dist.topCategory.percentage}%)` : '0% of catalog');
+  setText('catMetricUncategorized', String(dist.uncategorizedCount));
+  setText('catMetricUncatSub', dist.uncategorizedCount === 0 ? '✓ All items categorized' : `${dist.uncategorizedCount} need classification`);
+  setText('catInsightText', generateCategoryInsight(dist));
+
+  const badge = $('catVarietyBadge');
+  if (badge) {
+    badge.textContent = dist.varietyRating;
+    if (badge.style) {
+      if (dist.uniqueCategoryCount >= 4) {
+        badge.style.color = '#38bdf8';
+        badge.style.borderColor = '#0284c7';
+      } else if (dist.uniqueCategoryCount > 0) {
+        badge.style.color = '#34d399';
+        badge.style.borderColor = '#16a34a';
+      } else {
+        badge.style.color = '#94a3b8';
+        badge.style.borderColor = '#475569';
+      }
+    }
+  }
+
+  if (!container) return;
+
+  renderD3CategoryChart(container, dist, {
+    view: categoryViewState.view,
+    sortBy: categoryViewState.sortBy,
+    searchQuery: categoryViewState.searchQuery,
+    onCategoryClick: (cat) => {
+      categoryViewState.selectedCategory = cat;
+      renderCategoryDrilldown(cat);
+    }
+  });
+}
+
+/**
+ * Renders the interactive drill-down item list when an operator clicks on a category bar.
+ */
+function renderCategoryDrilldown(cat) {
+  const panel = $('categoryDrilldownPanel');
+  if (!panel || !cat) return;
+
+  setDisplay(panel, 'block');
+  setText('drilldownCategoryName', cat.name);
+  setText('drilldownCount', `(${cat.count} items - ${cat.percentage}% of catalog)`);
+  setText('drilldownToastMapping', `Maps to Toast: ${cat.toastDepartment}`);
+
+  const listEl = $('drilldownItemsList');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  const items = cat.rawItems || [];
+  for (const item of items) {
+    const name = item.name || item.current_name || item.original_name || 'Unnamed Product';
+    const barcode = (typeof item.barcode === 'object' ? item.barcode?.original : item.barcode) || 'No Barcode';
+    const price = item.price ? `$${Number(item.price).toFixed(2)}` : 'No Price';
+    const cost = item.cost ? `Cost: $${Number(item.cost).toFixed(2)}` : '';
+
+    const chip = document.createElement('div');
+    chip.className = 'drilldown-item-chip';
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'drilldown-item-name';
+    nameDiv.title = name;
+    nameDiv.textContent = name;
+
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'drilldown-item-meta';
+
+    const bcSpan = document.createElement('span');
+    bcSpan.style.fontFamily = 'monospace';
+    bcSpan.style.color = '#38bdf8';
+    bcSpan.textContent = barcode;
+
+    const priceSpan = document.createElement('span');
+    priceSpan.style.fontWeight = '600';
+    priceSpan.style.color = '#34d399';
+    priceSpan.textContent = price;
+
+    metaDiv.append(bcSpan, priceSpan);
+    chip.append(nameDiv, metaDiv);
+
+    if (cost) {
+      const costDiv = document.createElement('div');
+      costDiv.style.fontSize = '10px';
+      costDiv.style.color = '#64748b';
+      costDiv.textContent = cost;
+      chip.append(costDiv);
+    }
+
+    listEl.appendChild(chip);
+  }
+}
+
+// Wire Category Distribution Visual Summary UI Controls
+bindClick('btnCatChartBars', () => {
+  categoryViewState.view = 'bar';
+  const barBtn = $('btnCatChartBars');
+  const donutBtn = $('btnCatChartDonut');
+  if (barBtn) barBtn.classList.add('active');
+  if (donutBtn) donutBtn.classList.remove('active');
+  updateStep2CategoryVisualSummary();
+});
+
+bindClick('btnCatChartDonut', () => {
+  categoryViewState.view = 'donut';
+  const barBtn = $('btnCatChartBars');
+  const donutBtn = $('btnCatChartDonut');
+  if (donutBtn) donutBtn.classList.add('active');
+  if (barBtn) barBtn.classList.remove('active');
+  updateStep2CategoryVisualSummary();
+});
+
+bindChange('catSortSelect', (e) => {
+  if (e && e.target) {
+    categoryViewState.sortBy = e.target.value;
+    updateStep2CategoryVisualSummary();
+  }
+});
+
+const catSearch = $('catSearchInput');
+if (catSearch) {
+  catSearch.addEventListener('input', (e) => {
+    categoryViewState.searchQuery = e.target.value;
+    updateStep2CategoryVisualSummary();
+  });
+}
+
+bindClick('btnCloseDrilldown', () => {
+  categoryViewState.selectedCategory = null;
+  setDisplay('categoryDrilldownPanel', 'none');
+});
+
+// Window resize listener to re-render D3 chart responsively
+if (typeof window !== 'undefined') {
+  let catResizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (currentWizardStep === 2) {
+      clearTimeout(catResizeTimer);
+      catResizeTimer = setTimeout(() => {
+        updateStep2CategoryVisualSummary();
+      }, 150);
+    }
+  });
+}
+
 bindClick('btnGateReviewAll', () => setWizardStep(3));
 
 // Stepper click listeners
@@ -2274,6 +2456,7 @@ function loadSampleInventory() {
   S.canonical = [];
   S.page = 1;
   rebuild(false);
+  updateStep2CategoryVisualSummary();
 
   const succCard = $('step1SuccessCard');
   if (succCard) setDisplay(succCard, 'block');

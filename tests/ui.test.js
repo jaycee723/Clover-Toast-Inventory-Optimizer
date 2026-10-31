@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 // Minimal DOM stand-in. This exercises app.js wiring with the real engine; it is NOT a real browser.
 class El {
-  constructor(tag) { this.tagName = tag; this.children = []; this.textContent = ''; this.className = ''; this.value = ''; this.disabled = false; this.checked = false; this.files = []; this.attrs = {}; this.listeners = {}; this.onclick = null; this.onchange = null; }
+  constructor(tag) { this.tagName = tag; this.children = []; this.textContent = ''; this.className = ''; this.value = ''; this.disabled = false; this.checked = false; this.files = []; this.attrs = {}; this.listeners = {}; this.onclick = null; this.onchange = null; this.style = {}; }
   append(...n) { this.children.push(...n); }
   replaceChildren(...n) { this.children = [...n]; }
   setAttribute(k, v) { this.attrs[k] = v; }
