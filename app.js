@@ -1925,7 +1925,7 @@ async function onSendAiPrompt() {
   try {
     const payload = {
       prompt,
-      items: prepareDatasetForAi(S.records, S.rows, 150)
+      items: prepareDatasetForAi(S.records, S.rows, 50)
     };
 
     const res = await fetch('/api/ai/format', {
@@ -1950,8 +1950,8 @@ async function onSendAiPrompt() {
       setDisplay(sec, 'none');
     }
   } catch (err) {
-    console.error('AI assistant error:', err);
-    appendAiMessage('Gemini Assistant', `Error: ${err.message || 'Unable to communicate with Gemini cloud service.'}`);
+    console.warn('AI assistant notice:', err.message || err);
+    appendAiMessage('Gemini Assistant', `Notice: ${err.message || 'Unable to communicate with Gemini cloud service.'}`);
   } finally {
     if (btn) btn.disabled = false;
     if (btnText) btnText.textContent = 'Send';
@@ -3167,8 +3167,8 @@ async function handleCopilotChat(prompt) {
     const pricePendingCount = S.rows.filter((r) => r.price_status === 'pending_approval').length;
     const priceMissingCount = S.rows.filter((r) => !r.price || Number(r.price) <= 0).length;
 
-    // Full catalog context with all fields and diagnostic numbers
-    const allItems = prepareDatasetForAi(S.records, S.rows, 5000);
+    // Representative catalog sample with diagnostic metrics
+    const sampleItems = prepareDatasetForAi(S.records, S.rows, 35);
     const context = {
       step: currentWizardStep,
       totalItems: S.records.length,
@@ -3181,7 +3181,7 @@ async function handleCopilotChat(prompt) {
     const res = await fetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: cleanPrompt, context, items: allItems })
+      body: JSON.stringify({ message: cleanPrompt, context, items: sampleItems })
     });
 
     const data = await res.json();
