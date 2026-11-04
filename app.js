@@ -60,7 +60,19 @@ import {
   sendInventoryReportEmail,
   createBarcodeAuditForm,
   showGooglePicker,
+  listDriveFolderContents,
+  downloadDriveSpreadsheetOrCsv,
 } from './src/workspace.js';
+import {
+  AVERY_TEMPLATES,
+  DEFAULT_STORE_LOGO_SVG,
+  calculateAverySheetSlots,
+  extractNameAndVolume,
+  formatLabelPrice,
+  extractItemBrand,
+  groupItemsByBrand,
+  createAveryQueueItem
+} from './src/avery_templates.js';
 import { parseCsv } from './src/csv.js';
 import {
   isPaddingAnomaly,
@@ -272,6 +284,12 @@ function rebuild(keepDecisions = true) {
   render();
   if (typeof updateStep2CategoryVisualSummary === 'function' && currentWizardStep === 2) {
     updateStep2CategoryVisualSummary();
+  }
+  if (typeof populateAveryBrandSelect === 'function') {
+    populateAveryBrandSelect();
+  }
+  if (typeof renderAveryLabelPreview === 'function') {
+    renderAveryLabelPreview();
   }
 }
 function filtered() {
@@ -3243,5 +3261,1150 @@ bindClick('toggleAiCompanionBtn', () => {
   panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
 });
 
+// ==========================================================================
+// Google Drive Folder Navigation Tree Controller
+// ==========================================================================
 
+const driveState = {
+  currentFolderId: 'root',
+  breadcrumbs: [{ id: 'root', name: 'My Drive' }],
+  items: [],
+  selectedFile: null,
+  searchQuery: ''
+};
 
+function openDriveExplorerModal() {
+  const modal = $('driveExplorerModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  const token = getAccessToken();
+  const notice = $('driveAuthNotice');
+  if (!token) {
+    if (notice) notice.style.display = 'block';
+    renderDriveBreadcrumbs();
+    renderDriveItemsList([]);
+    return;
+  }
+  if (notice) notice.style.display = 'none';
+
+  loadDriveFolder('root', 'My Drive', true);
+}
+
+function closeDriveExplorerModal() {
+  const modal = $('driveExplorerModal');
+  if (modal) modal.style.display = 'none';
+  driveState.selectedFile = null;
+  const confirmBtn = $('btnConfirmDriveImport');
+  if (confirmBtn) confirmBtn.disabled = true;
+  const selInfo = $('driveSelectedFileInfo');
+  if (selInfo) selInfo.textContent = 'No file selected';
+}
+
+bindClick('btnImportGoogleDrive', openDriveExplorerModal);
+bindClick('modalCloseDriveExplorer', closeDriveExplorerModal);
+bindClick('modalCancelDrive', closeDriveExplorerModal);
+
+const driveModalEl = $('driveExplorerModal');
+if (driveModalEl) {
+  driveModalEl.addEventListener('click', (e) => {
+    if (e.target === driveModalEl) closeDriveExplorerModal();
+  });
+}
+
+bindClick('btnDriveSignIn', async () => {
+  try {
+    const res = await signInWithGoogle();
+    if (res?.accessToken) {
+      const notice = $('driveAuthNotice');
+      if (notice) notice.style.display = 'none';
+      loadDriveFolder('root', 'My Drive', true);
+    }
+  } catch (err) {
+    alert(`Google Sign-In notice: ${err.message || err}`);
+  }
+});
+
+bindClick('btnRefreshDriveFolder', () => {
+  loadDriveFolder(driveState.currentFolderId, null, false);
+});
+
+const driveSearch = $('driveSearchInput');
+if (driveSearch) {
+  driveSearch.addEventListener('input', (e) => {
+    driveState.searchQuery = (e.target.value || '').trim().toLowerCase();
+    renderFilteredDriveItems();
+  });
+}
+
+async function loadDriveFolder(folderId, folderName = null, resetBreadcrumbs = false) {
+  const token = getAccessToken();
+  if (!token) {
+    const notice = $('driveAuthNotice');
+    if (notice) notice.style.display = 'block';
+    return;
+  }
+
+  driveState.currentFolderId = folderId;
+  driveState.selectedFile = null;
+  const confirmBtn = $('btnConfirmDriveImport');
+  if (confirmBtn) confirmBtn.disabled = true;
+  const selInfo = $('driveSelectedFileInfo');
+  if (selInfo) selInfo.textContent = 'No file selected';
+
+  if (resetBreadcrumbs) {
+    driveState.breadcrumbs = [{ id: folderId, name: folderName || 'My Drive' }];
+  } else if (folderName) {
+    const existingIdx = driveState.breadcrumbs.findIndex((b) => b.id === folderId);
+    if (existingIdx >= 0) {
+      driveState.breadcrumbs = driveState.breadcrumbs.slice(0, existingIdx + 1);
+    } else {
+      driveState.breadcrumbs.push({ id: folderId, name: folderName });
+    }
+  }
+
+  renderDriveBreadcrumbs();
+
+  const spinner = $('driveLoadingSpinner');
+  const listEl = $('driveItemsList');
+  const emptyEl = $('driveEmptyState');
+
+  if (spinner) spinner.style.display = 'block';
+  if (listEl) listEl.style.display = 'none';
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  try {
+    const res = await listDriveFolderContents(token, folderId);
+    driveState.items = res.files || [];
+    renderFilteredDriveItems();
+  } catch (err) {
+    if (spinner) spinner.style.display = 'none';
+    if (listEl) {
+      listEl.style.display = 'block';
+      listEl.innerHTML = `<div style="padding:20px;text-align:center;color:#f87171;">⚠️ Failed to load folder: ${escapeHtml(err.message || String(err))}</div>`;
+    }
+  }
+}
+
+function renderDriveBreadcrumbs() {
+  const nav = $('driveBreadcrumbs');
+  if (!nav) return;
+  nav.replaceChildren();
+
+  driveState.breadcrumbs.forEach((crumb, idx) => {
+    if (idx > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'drive-crumb-sep';
+      sep.textContent = '>';
+      nav.append(sep);
+    }
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'drive-crumb-btn';
+    btn.textContent = crumb.name;
+    if (idx === driveState.breadcrumbs.length - 1) {
+      btn.style.color = '#f8fafc';
+      btn.style.cursor = 'default';
+    } else {
+      btn.addEventListener('click', () => {
+        loadDriveFolder(crumb.id, crumb.name, false);
+      });
+    }
+    nav.append(btn);
+  });
+}
+
+function renderFilteredDriveItems() {
+  const q = driveState.searchQuery;
+  const filtered = driveState.items.filter((item) => {
+    if (!q) return true;
+    return item.name.toLowerCase().includes(q);
+  });
+  renderDriveItemsList(filtered);
+}
+
+function renderDriveItemsList(items) {
+  const spinner = $('driveLoadingSpinner');
+  const listEl = $('driveItemsList');
+  const emptyEl = $('driveEmptyState');
+
+  if (spinner) spinner.style.display = 'none';
+
+  if (!items || items.length === 0) {
+    if (listEl) listEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+
+  if (emptyEl) emptyEl.style.display = 'none';
+  if (!listEl) return;
+  listEl.style.display = 'flex';
+  listEl.replaceChildren();
+
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = `drive-item-row ${driveState.selectedFile?.id === item.id ? 'selected' : ''}`;
+
+    const left = document.createElement('div');
+    left.className = 'drive-item-left';
+
+    const icon = document.createElement('span');
+    icon.className = 'drive-item-icon';
+    if (item.isFolder) {
+      icon.textContent = '📁';
+    } else if (item.isGoogleSheet) {
+      icon.textContent = '📊';
+    } else if (item.isXlsx) {
+      icon.textContent = '📗';
+    } else if (item.isCsv) {
+      icon.textContent = '📄';
+    } else {
+      icon.textContent = '📎';
+    }
+
+    const name = document.createElement('span');
+    name.className = 'drive-item-name';
+    name.textContent = item.name;
+
+    left.append(icon, name);
+
+    const meta = document.createElement('div');
+    meta.className = 'drive-item-meta';
+
+    if (item.isFolder) {
+      const folderBadge = document.createElement('span');
+      folderBadge.style.color = '#94a3b8';
+      folderBadge.textContent = 'Folder';
+      meta.append(folderBadge);
+    } else {
+      if (item.isGoogleSheet) {
+        const badge = document.createElement('span');
+        badge.className = 'drive-badge-sheet';
+        badge.textContent = 'Google Sheet';
+        meta.append(badge);
+      } else if (item.isXlsx) {
+        const badge = document.createElement('span');
+        badge.className = 'drive-badge-excel';
+        badge.textContent = 'Excel';
+        meta.append(badge);
+      } else if (item.isCsv) {
+        const badge = document.createElement('span');
+        badge.className = 'drive-badge-csv';
+        badge.textContent = 'CSV';
+        meta.append(badge);
+      }
+      if (item.sizeFormatted) {
+        const sz = document.createElement('span');
+        sz.textContent = item.sizeFormatted;
+        meta.append(sz);
+      }
+    }
+
+    if (item.modifiedFormatted) {
+      const dt = document.createElement('span');
+      dt.textContent = item.modifiedFormatted;
+      meta.append(dt);
+    }
+
+    row.append(left, meta);
+
+    row.addEventListener('click', () => {
+      if (item.isFolder) {
+        loadDriveFolder(item.id, item.name, false);
+      } else if (item.isSupportedInventory) {
+        driveState.selectedFile = item;
+        document.querySelectorAll('.drive-item-row').forEach((r) => r.classList.remove('selected'));
+        row.classList.add('selected');
+        const confirmBtn = $('btnConfirmDriveImport');
+        if (confirmBtn) confirmBtn.disabled = false;
+        const selInfo = $('driveSelectedFileInfo');
+        if (selInfo) {
+          selInfo.innerHTML = `Selected: <strong>${escapeHtml(item.name)}</strong>`;
+        }
+      }
+    });
+
+    listEl.append(row);
+  });
+}
+
+bindClick('btnConfirmDriveImport', async () => {
+  const file = driveState.selectedFile;
+  const token = getAccessToken();
+  if (!file || !token) return;
+
+  const btn = $('btnConfirmDriveImport');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳ Downloading &amp; Parsing…</span>';
+  }
+
+  try {
+    const downloaded = await downloadDriveSpreadsheetOrCsv(token, file);
+    let parsed;
+    if (downloaded.format === 'xlsx') {
+      parsed = await parseInventoryFile({
+        name: downloaded.filename,
+        arrayBuffer: async () => downloaded.data,
+        text: async () => ''
+      });
+    } else {
+      parsed = await parseInventoryFile({
+        name: downloaded.filename,
+        text: async () => downloaded.data,
+        arrayBuffer: async () => new TextEncoder().encode(downloaded.data).buffer
+      });
+    }
+
+    if (!parsed || !parsed.records || !parsed.records.length) {
+      throw new Error('Spreadsheet parsed successfully but contained 0 inventory items.');
+    }
+
+    S.records = parsed.records;
+    S.canonical = parsed.canonical || [];
+    S.page = 1;
+    rebuild(false);
+    updateStep2CategoryVisualSummary();
+    currentSuggestions = scanInventoryForSpellingSuggestions(S.records, S.aliases);
+    renderSuggestions();
+
+    const succCard = $('step1SuccessCard');
+    if (succCard) setDisplay(succCard, 'block');
+    const summaryEl = $('step1ItemSummary');
+    if (summaryEl) summaryEl.textContent = `Loaded ${S.records.length} items from Google Drive file "${file.name}".`;
+    const sub = $('fileStatusSub');
+    if (sub) sub.textContent = `${S.records.length} items loaded from Google Drive`;
+
+    postAiAnnouncement(`📁 Loaded ${S.records.length} items from Google Drive ("${file.name}"). Click "Continue to Smart Clean" to begin Step 2!`);
+
+    closeDriveExplorerModal();
+  } catch (err) {
+    alert(`Failed to import file from Google Drive: ${err.message || err}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span>📥 Import Selected File</span>';
+    }
+  }
+});
+
+// ==========================================================================
+// Avery Price Tag & Sticker Label Printing Studio Controller
+// ==========================================================================
+
+export const averyStudioState = {
+  templateId: '5160',
+  logoUrl: DEFAULT_STORE_LOGO_SVG,
+  filterCategory: 'all',
+  filterStatus: 'approved',
+  selectedBrand: '',
+  startSlot: 1,
+  copies: 1,
+  showGuide: false,
+  currentSheet: 1,
+  printQueue: [],
+  isQueueInitialized: false
+};
+
+export function getAveryCatalogItems() {
+  const source = (S.rows && S.rows.length > 0)
+    ? S.rows
+    : (S.records && S.records.length > 0)
+      ? S.records.map((r, i) => ({
+          id: `r${i + 1}`,
+          current_name: r.name,
+          name: r.name,
+          original_name: r.name,
+          price: r.price,
+          barcode: { digits: r.barcode || '' },
+          category: r.category || '',
+          brand: r.brand || ''
+        }))
+      : SAMPLE_777_INVENTORY.map((r, i) => ({
+          id: `s${i + 1}`,
+          current_name: r.name,
+          name: r.name,
+          original_name: r.name,
+          price: r.price,
+          barcode: { digits: r.barcode || '' },
+          category: r.category || '',
+          brand: r.brand || ''
+        }));
+
+  return source.filter((r) => {
+    if (averyStudioState.filterStatus === 'approved' && S.rows && S.rows.length > 0) {
+      const ready = isApproved(r);
+      const hasBarcode = !!getBarcodeIdentity(r);
+      if (!ready && !hasBarcode && S.rows.some(isApproved)) return false;
+    }
+
+    if (averyStudioState.filterCategory !== 'all') {
+      const cat = (r.category || '').toLowerCase();
+      const filterCat = averyStudioState.filterCategory.toLowerCase();
+      if (!cat.includes(filterCat)) return false;
+    }
+
+    return true;
+  });
+}
+
+export function populateAveryBrandSelect() {
+  const brandSelect = $('averyBrandSelect');
+  if (!brandSelect) return;
+
+  const catalog = (S.rows && S.rows.length > 0) ? S.rows : ((S.records && S.records.length > 0) ? S.records : SAMPLE_777_INVENTORY);
+  const brandGroups = groupItemsByBrand(catalog);
+
+  const prevVal = averyStudioState.selectedBrand || brandSelect.value;
+  brandSelect.replaceChildren();
+
+  const defOpt = document.createElement('option');
+  defOpt.value = '';
+  defOpt.textContent = `-- Choose Brand to Auto-Add (${brandGroups.length} brands) --`;
+  brandSelect.append(defOpt);
+
+  brandGroups.forEach(({ brand, count }) => {
+    const opt = document.createElement('option');
+    opt.value = brand;
+    opt.textContent = `${brand} (${count} item${count === 1 ? '' : 's'})`;
+    brandSelect.append(opt);
+  });
+
+  if (prevVal && brandGroups.some((b) => b.brand === prevVal)) {
+    brandSelect.value = prevVal;
+  }
+
+  const countText = $('averyBrandCountText');
+  if (countText) {
+    countText.textContent = `${brandGroups.length} brands detected`;
+  }
+}
+
+export function autoAddBrandToQueue(brandName) {
+  if (!brandName || typeof brandName !== 'string') return 0;
+  const catalog = (S.rows && S.rows.length > 0) ? S.rows : ((S.records && S.records.length > 0) ? S.records : SAMPLE_777_INVENTORY);
+  const targetBrand = brandName.trim().toLowerCase();
+
+  const matched = catalog.filter((it) => {
+    const b = extractItemBrand(it);
+    return b.toLowerCase() === targetBrand;
+  });
+
+  if (!matched.length) return 0;
+
+  matched.forEach((it) => {
+    averyStudioState.printQueue.push(createAveryQueueItem(it));
+  });
+
+  averyStudioState.isQueueInitialized = true;
+  renderAveryQueueTable();
+  renderAveryLabelPreview();
+  postAiAnnouncement(`🏷️ Auto-added ${matched.length} sticker label(s) for brand "${brandName}" to Avery print sheet.`);
+  return matched.length;
+}
+
+export function initAveryQueue(force = false) {
+  if (!force && averyStudioState.isQueueInitialized && averyStudioState.printQueue.length > 0) {
+    populateAveryBrandSelect();
+    renderAveryQueueTable();
+    return;
+  }
+
+  const items = getAveryCatalogItems();
+  averyStudioState.printQueue = items.map((it) => createAveryQueueItem(it));
+  averyStudioState.isQueueInitialized = true;
+  populateAveryBrandSelect();
+  renderAveryQueueTable();
+}
+
+export function editAveryQueueItem(id, updates = {}) {
+  const item = averyStudioState.printQueue.find((it) => it.id === id);
+  if (!item) return false;
+
+  if (updates.name !== undefined) item.name = updates.name;
+  if (updates.displayName !== undefined) item.displayName = updates.displayName;
+
+  if (updates.volume !== undefined) {
+    const { volume } = extractNameAndVolume(`Dummy ${updates.volume}`);
+    item.volume = volume || updates.volume;
+  }
+
+  if (updates.price !== undefined) {
+    item.price = formatLabelPrice(updates.price);
+  }
+
+  if (updates.barcode !== undefined) item.barcode = updates.barcode;
+  if (updates.brand !== undefined) item.brand = updates.brand;
+  if (updates.copies !== undefined) {
+    item.copies = Math.max(1, Math.min(100, Number(updates.copies) || 1));
+  }
+
+  renderAveryQueueTable();
+  renderAveryLabelPreview();
+  return true;
+}
+
+export function removeAveryQueueItem(id) {
+  const initialLen = averyStudioState.printQueue.length;
+  averyStudioState.printQueue = averyStudioState.printQueue.filter((it) => it.id !== id);
+  renderAveryQueueTable();
+  renderAveryLabelPreview();
+  return averyStudioState.printQueue.length < initialLen;
+}
+
+export function addCustomAveryItem(customData = {}) {
+  const newItem = createAveryQueueItem({}, {
+    displayName: customData.displayName || 'Custom Price Tag',
+    name: customData.name || 'Custom Price Tag',
+    volume: customData.volume || '750ml',
+    price: customData.price || '$9.99',
+    barcode: customData.barcode || '',
+    brand: customData.brand || 'Custom',
+    copies: customData.copies || 1
+  });
+  averyStudioState.printQueue.unshift(newItem);
+  renderAveryQueueTable();
+  renderAveryLabelPreview();
+  return newItem;
+}
+
+export function renderAveryQueueTable() {
+  const tbody = $('averyQueueTableBody');
+  const countBadge = $('averyQueueCountBadge');
+  const filteredCountText = $('averyFilteredCountText');
+
+  const totalCopies = averyStudioState.printQueue.reduce((acc, it) => acc + (it.copies || 1), 0);
+
+  if (countBadge) {
+    countBadge.textContent = `${averyStudioState.printQueue.length} items (${totalCopies} tags)`;
+  }
+  if (filteredCountText) {
+    filteredCountText.textContent = `${averyStudioState.printQueue.length} items queued`;
+  }
+
+  if (!tbody) return;
+  tbody.replaceChildren();
+
+  if (averyStudioState.printQueue.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 8;
+    td.style.padding = '20px';
+    td.style.textAlign = 'center';
+    td.style.color = '#94a3b8';
+    td.innerHTML = 'Sheet queue is empty. Choose a brand above to auto-add items, or click <strong>"↺ Reset to Catalog"</strong> to load all items.';
+    tr.append(td);
+    tbody.append(tr);
+    return;
+  }
+
+  averyStudioState.printQueue.forEach((item, idx) => {
+    const tr = document.createElement('tr');
+
+    // 1. Index
+    const tdIdx = document.createElement('td');
+    tdIdx.style.color = '#64748b';
+    tdIdx.style.fontSize = '11px';
+    tdIdx.textContent = String(idx + 1);
+    tr.append(tdIdx);
+
+    // 2. Product Name
+    const tdName = document.createElement('td');
+    const inputName = document.createElement('input');
+    inputName.type = 'text';
+    inputName.className = 'avery-queue-input';
+    inputName.value = item.displayName || item.name;
+    inputName.title = 'Edit product name on label';
+    inputName.onchange = (e) => {
+      item.displayName = e.target.value.trim();
+      renderAveryLabelPreview();
+    };
+    tdName.append(inputName);
+    tr.append(tdName);
+
+    // 3. Volume / Size (Normalized e.g. 11oz, 1 L)
+    const tdVol = document.createElement('td');
+    const inputVol = document.createElement('input');
+    inputVol.type = 'text';
+    inputVol.className = 'avery-queue-input';
+    inputVol.value = item.volume || '';
+    inputVol.title = 'Edit volume (e.g. 11oz, 1 L, 750ml, 12-Pack)';
+    inputVol.onblur = (e) => {
+      const val = e.target.value.trim();
+      if (val) {
+        const { volume } = extractNameAndVolume(`Dummy ${val}`);
+        item.volume = volume || val;
+        inputVol.value = item.volume;
+      } else {
+        item.volume = '';
+      }
+      renderAveryLabelPreview();
+    };
+    tdVol.append(inputVol);
+    tr.append(tdVol);
+
+    // 4. Retail Price
+    const tdPrice = document.createElement('td');
+    const inputPrice = document.createElement('input');
+    inputPrice.type = 'text';
+    inputPrice.className = 'avery-queue-input';
+    inputPrice.value = item.price || '$0.00';
+    inputPrice.title = 'Edit retail price';
+    inputPrice.onblur = (e) => {
+      item.price = formatLabelPrice(e.target.value);
+      inputPrice.value = item.price;
+      renderAveryLabelPreview();
+    };
+    tdPrice.append(inputPrice);
+    tr.append(tdPrice);
+
+    // 5. Barcode
+    const tdBarcode = document.createElement('td');
+    const inputBc = document.createElement('input');
+    inputBc.type = 'text';
+    inputBc.className = 'avery-queue-input';
+    inputBc.value = item.barcode || '';
+    inputBc.title = 'Edit barcode / UPC';
+    inputBc.onchange = (e) => {
+      item.barcode = e.target.value.trim();
+      renderAveryLabelPreview();
+    };
+    tdBarcode.append(inputBc);
+    tr.append(tdBarcode);
+
+    // 6. Copies
+    const tdCopies = document.createElement('td');
+    const inputCopies = document.createElement('input');
+    inputCopies.type = 'number';
+    inputCopies.min = '1';
+    inputCopies.max = '100';
+    inputCopies.className = 'avery-queue-input';
+    inputCopies.style.textAlign = 'center';
+    inputCopies.value = String(item.copies || 1);
+    inputCopies.onchange = (e) => {
+      const num = parseInt(e.target.value, 10);
+      item.copies = isNaN(num) ? 1 : Math.max(1, Math.min(100, num));
+      inputCopies.value = String(item.copies);
+      renderAveryQueueTable();
+      renderAveryLabelPreview();
+    };
+    tdCopies.append(inputCopies);
+    tr.append(tdCopies);
+
+    // 7. Brand
+    const tdBrand = document.createElement('td');
+    const brandSpan = document.createElement('span');
+    brandSpan.className = 'status-pill';
+    brandSpan.style.fontSize = '10px';
+    brandSpan.style.padding = '1px 6px';
+    brandSpan.textContent = item.brand || 'Other';
+    tdBrand.append(brandSpan);
+    tr.append(tdBrand);
+
+    // 8. Action (✕ Remove)
+    const tdAction = document.createElement('td');
+    tdAction.style.textAlign = 'center';
+    const btnRemove = document.createElement('button');
+    btnRemove.type = 'button';
+    btnRemove.className = 'btn-remove-avery-item';
+    btnRemove.setAttribute('data-id', item.id);
+    if (btnRemove.dataset) {
+      btnRemove.dataset.id = item.id;
+    }
+    btnRemove.textContent = '✕ Remove';
+    btnRemove.onclick = () => {
+      removeAveryQueueItem(item.id);
+    };
+    tdAction.append(btnRemove);
+    tr.append(tdAction);
+
+    tbody.append(tr);
+  });
+}
+
+export function openAveryEditModal(itemId) {
+  const item = averyStudioState.printQueue.find((it) => it.id === itemId);
+  if (!item) return;
+
+  const modal = $('averyEditLabelModal');
+  if (!modal) return;
+
+  const idIn = $('editAveryItemId');
+  if (idIn) idIn.value = item.id;
+
+  const nameIn = $('editAveryItemName');
+  if (nameIn) nameIn.value = item.displayName || item.name || '';
+
+  const volIn = $('editAveryItemVolume');
+  if (volIn) volIn.value = item.volume || '';
+
+  const priceIn = $('editAveryItemPrice');
+  if (priceIn) priceIn.value = item.price || '$0.00';
+
+  const bcIn = $('editAveryItemBarcode');
+  if (bcIn) bcIn.value = item.barcode || '';
+
+  const brandIn = $('editAveryItemBrand');
+  if (brandIn) brandIn.value = item.brand || '';
+
+  const copiesIn = $('editAveryItemCopies');
+  if (copiesIn) copiesIn.value = String(item.copies || 1);
+
+  modal.style.display = 'flex';
+}
+
+export function closeAveryEditModal() {
+  const modal = $('averyEditLabelModal');
+  if (modal) modal.style.display = 'none';
+}
+
+export function renderAveryLabelPreview() {
+  const template = AVERY_TEMPLATES[averyStudioState.templateId] || AVERY_TEMPLATES['5160'];
+
+  // Update specs UI
+  const badge = $('averyTemplateBadge');
+  if (badge) badge.textContent = `${template.code} (${template.labelsPerSheet}/Sheet)`;
+
+  const dimText = $('averyDimensionsText');
+  if (dimText) dimText.textContent = `${template.labelWidthIn}″ × ${template.labelHeightIn}″ • ${template.labelsPerSheet}/sheet`;
+
+  const specMargins = $('specMargins');
+  if (specMargins) specMargins.textContent = `Top: ${template.topMarginIn}″ • Left: ${template.leftMarginIn}″`;
+
+  const specPitch = $('specPitch');
+  if (specPitch) specPitch.textContent = `Pitch: H ${template.horizontalPitchIn}″ × V ${template.verticalPitchIn}″`;
+
+  const maxSlotHint = $('averyMaxSlotHint');
+  if (maxSlotHint) maxSlotHint.textContent = `of ${template.labelsPerSheet}`;
+
+  const slotInput = $('averyStartSlotInput');
+  if (slotInput) slotInput.max = String(template.labelsPerSheet);
+
+  const logoImg = $('averyLogoImg');
+  if (logoImg) logoImg.src = averyStudioState.logoUrl;
+
+  // Make sure queue is initialized
+  if (!averyStudioState.isQueueInitialized) {
+    initAveryQueue(false);
+  }
+
+  const queueItems = averyStudioState.printQueue;
+
+  const result = calculateAverySheetSlots(averyStudioState.templateId, queueItems, {
+    startSlot: averyStudioState.startSlot,
+    copiesPerItem: averyStudioState.copies
+  });
+
+  const totalSheets = Math.max(1, result.sheets.length);
+  averyStudioState.currentSheet = Math.min(averyStudioState.currentSheet, totalSheets);
+
+  // Update sheet pagination controls
+  const prevBtn = $('btnAveryPrevSheet');
+  const nextBtn = $('btnAveryNextSheet');
+  const pageIndicator = $('averySheetPageIndicator');
+  const summaryBadge = $('averySheetSummaryBadge');
+
+  if (prevBtn) prevBtn.disabled = averyStudioState.currentSheet <= 1;
+  if (nextBtn) nextBtn.disabled = averyStudioState.currentSheet >= totalSheets;
+  if (pageIndicator) pageIndicator.textContent = `${averyStudioState.currentSheet} / ${totalSheets}`;
+  if (summaryBadge) {
+    summaryBadge.textContent = `Sheet ${averyStudioState.currentSheet} of ${totalSheets} (${result.totalLabelsToPrint} tags)`;
+  }
+
+  const activeSheet = result.sheets[averyStudioState.currentSheet - 1] || result.sheets[0];
+
+  // Render on-screen preview (72 DPI scale: 1in = 72px)
+  const previewSheet = $('averyPreviewSheet');
+  if (previewSheet) {
+    previewSheet.replaceChildren();
+
+    previewSheet.style.paddingTop = `${template.topMarginIn * 72}px`;
+    previewSheet.style.paddingLeft = `${template.leftMarginIn * 72}px`;
+    previewSheet.style.paddingRight = `${(template.sheetWidthIn - template.leftMarginIn - (template.columns * template.labelWidthIn + (template.columns - 1) * template.colGapIn)) * 72}px`;
+    previewSheet.style.paddingBottom = `${(template.sheetHeightIn - template.topMarginIn - (template.rows * template.labelHeightIn + (template.rows - 1) * template.rowGapIn)) * 72}px`;
+
+    const grid = document.createElement('div');
+    grid.className = 'avery-preview-grid';
+    grid.style.gridTemplateColumns = `repeat(${template.columns}, ${template.labelWidthIn * 72}px)`;
+    grid.style.gridAutoRows = `${template.labelHeightIn * 72}px`;
+    grid.style.columnGap = `${template.colGapIn * 72}px`;
+    grid.style.rowGap = `${template.rowGapIn * 72}px`;
+
+    if (activeSheet && activeSheet.slots) {
+      activeSheet.slots.forEach((slot) => {
+        const labelEl = document.createElement('div');
+        labelEl.className = `avery-preview-label ${averyStudioState.showGuide ? 'show-guide' : ''} ${slot.isOffsetEmpty ? 'offset-empty' : ''}`;
+        labelEl.style.borderRadius = template.cornerRadius;
+
+        if (slot.isOffsetEmpty) {
+          const hint = document.createElement('span');
+          hint.className = 'avery-offset-hint';
+          hint.textContent = slot.slotNumber < averyStudioState.startSlot ? `Slot ${slot.slotNumber} (Skipped)` : `Slot ${slot.slotNumber}`;
+          labelEl.append(hint);
+        } else if (slot.item) {
+          labelEl.title = `Click to edit "${slot.item.displayName}" (${slot.item.price})`;
+          labelEl.addEventListener('click', () => {
+            openAveryEditModal(slot.item.id);
+          });
+
+          const inner = document.createElement('div');
+          inner.className = 'avery-label-inner';
+          inner.style.padding = template.fontScale.paddingIn;
+
+          // Left: Brand Logo
+          const logoCol = document.createElement('div');
+          logoCol.className = 'avery-label-logo-col';
+          logoCol.style.width = `${template.fontScale.logoWidthIn * 72}px`;
+
+          const img = document.createElement('img');
+          img.className = 'avery-label-logo-img';
+          img.src = averyStudioState.logoUrl;
+          img.alt = 'Logo';
+          logoCol.append(img);
+
+          // Right: Item Content - All 3 Rows Guaranteed Visible
+          const contentCol = document.createElement('div');
+          contentCol.className = 'avery-label-content-col';
+
+          // Row 1: Product Name
+          const row1 = document.createElement('div');
+          row1.className = 'avery-row-1 avery-label-name-row';
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'avery-label-name';
+          nameSpan.style.fontSize = `${template.fontScale.namePt}pt`;
+          nameSpan.textContent = slot.item.displayName || slot.item.name;
+          row1.append(nameSpan);
+
+          // Row 2: Volume / Size & Barcode (Volume with capitalization rules e.g. 11oz, 1 L)
+          const row2 = document.createElement('div');
+          row2.className = 'avery-row-2 avery-label-meta-row';
+
+          if (slot.item.volume) {
+            const volBadge = document.createElement('span');
+            volBadge.className = 'avery-label-vol-badge';
+            volBadge.style.fontSize = `${template.fontScale.volumePt}pt`;
+            volBadge.textContent = slot.item.volume;
+            row2.append(volBadge);
+          }
+
+          if (slot.item.barcode) {
+            const bcSpan = document.createElement('span');
+            bcSpan.className = 'avery-label-barcode-small';
+            bcSpan.style.fontSize = `${template.fontScale.volumePt * 0.9}pt`;
+            bcSpan.textContent = slot.item.barcode;
+            row2.append(bcSpan);
+          } else if (slot.item.category) {
+            const catSpan = document.createElement('span');
+            catSpan.className = 'avery-label-barcode-small';
+            catSpan.style.fontSize = `${template.fontScale.volumePt * 0.85}pt`;
+            catSpan.textContent = slot.item.category;
+            row2.append(catSpan);
+          }
+
+          // Row 3: Large Retail Price
+          const row3 = document.createElement('div');
+          row3.className = 'avery-row-3 avery-label-price-row';
+          const priceSpan = document.createElement('span');
+          priceSpan.className = 'avery-label-price';
+          priceSpan.style.fontSize = `${template.fontScale.pricePt}pt`;
+          priceSpan.textContent = slot.item.price;
+          row3.append(priceSpan);
+
+          contentCol.append(row1, row2, row3);
+          inner.append(logoCol, contentCol);
+          labelEl.append(inner);
+        }
+
+        grid.append(labelEl);
+      });
+    }
+
+    previewSheet.append(grid);
+  }
+
+  // Dedicated physical print container (#averyPrintContainer)
+  const printContainer = $('averyPrintContainer');
+  if (printContainer) {
+    printContainer.replaceChildren();
+
+    result.sheets.forEach((sheet) => {
+      const sheetEl = document.createElement('div');
+      sheetEl.className = 'avery-print-sheet';
+      sheetEl.style.paddingTop = `${template.topMarginIn}in`;
+      sheetEl.style.paddingLeft = `${template.leftMarginIn}in`;
+
+      const grid = document.createElement('div');
+      grid.className = 'avery-print-grid';
+      grid.style.gridTemplateColumns = `repeat(${template.columns}, ${template.labelWidthIn}in)`;
+      grid.style.gridAutoRows = `${template.labelHeightIn}in`;
+      grid.style.columnGap = `${template.colGapIn}in`;
+      grid.style.rowGap = `${template.rowGapIn}in`;
+
+      sheet.slots.forEach((slot) => {
+        const labelEl = document.createElement('div');
+        labelEl.className = `avery-print-label ${averyStudioState.showGuide ? 'show-guide' : ''} ${slot.isOffsetEmpty ? 'offset-empty' : ''}`;
+        labelEl.style.width = `${template.labelWidthIn}in`;
+        labelEl.style.height = `${template.labelHeightIn}in`;
+        labelEl.style.borderRadius = template.cornerRadius;
+
+        if (!slot.isOffsetEmpty && slot.item) {
+          const inner = document.createElement('div');
+          inner.className = 'avery-label-inner';
+          inner.style.padding = template.fontScale.paddingIn;
+
+          const logoCol = document.createElement('div');
+          logoCol.className = 'avery-label-logo-col';
+          logoCol.style.width = `${template.fontScale.logoWidthIn}in`;
+
+          const img = document.createElement('img');
+          img.className = 'avery-label-logo-img';
+          img.src = averyStudioState.logoUrl;
+          img.alt = 'Logo';
+          logoCol.append(img);
+
+          const contentCol = document.createElement('div');
+          contentCol.className = 'avery-label-content-col';
+
+          // Row 1: Product Name
+          const row1 = document.createElement('div');
+          row1.className = 'avery-row-1 avery-label-name-row';
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'avery-label-name';
+          nameSpan.style.fontSize = `${template.fontScale.namePt}pt`;
+          nameSpan.textContent = slot.item.displayName || slot.item.name;
+          row1.append(nameSpan);
+
+          // Row 2: Volume / Size & Barcode
+          const row2 = document.createElement('div');
+          row2.className = 'avery-row-2 avery-label-meta-row';
+
+          if (slot.item.volume) {
+            const volBadge = document.createElement('span');
+            volBadge.className = 'avery-label-vol-badge';
+            volBadge.style.fontSize = `${template.fontScale.volumePt}pt`;
+            volBadge.textContent = slot.item.volume;
+            row2.append(volBadge);
+          }
+
+          if (slot.item.barcode) {
+            const bcSpan = document.createElement('span');
+            bcSpan.className = 'avery-label-barcode-small';
+            bcSpan.style.fontSize = `${template.fontScale.volumePt * 0.9}pt`;
+            bcSpan.textContent = slot.item.barcode;
+            row2.append(bcSpan);
+          } else if (slot.item.category) {
+            const catSpan = document.createElement('span');
+            catSpan.className = 'avery-label-barcode-small';
+            catSpan.style.fontSize = `${template.fontScale.volumePt * 0.85}pt`;
+            catSpan.textContent = slot.item.category;
+            row2.append(catSpan);
+          }
+
+          // Row 3: Large Retail Price
+          const row3 = document.createElement('div');
+          row3.className = 'avery-row-3 avery-label-price-row';
+          const priceSpan = document.createElement('span');
+          priceSpan.className = 'avery-label-price';
+          priceSpan.style.fontSize = `${template.fontScale.pricePt}pt`;
+          priceSpan.textContent = slot.item.price;
+          row3.append(priceSpan);
+
+          contentCol.append(row1, row2, row3);
+          inner.append(logoCol, contentCol);
+          labelEl.append(inner);
+        }
+
+        grid.append(labelEl);
+      });
+
+      sheetEl.append(grid);
+      printContainer.append(sheetEl);
+    });
+  }
+}
+
+// Bind Avery Label Studio Event Listeners
+const averySelect = $('averyTemplateSelect');
+if (averySelect) {
+  averySelect.addEventListener('change', (e) => {
+    averyStudioState.templateId = e.target.value;
+    averyStudioState.startSlot = 1;
+    const startInput = $('averyStartSlotInput');
+    if (startInput) startInput.value = '1';
+    renderAveryLabelPreview();
+  });
+}
+
+// Brand Filter & Auto-Add Listeners
+const averyBrandSelect = $('averyBrandSelect');
+if (averyBrandSelect) {
+  averyBrandSelect.addEventListener('change', (e) => {
+    averyStudioState.selectedBrand = e.target.value;
+  });
+}
+
+bindClick('btnAutoAddBrandLabels', () => {
+  const brandVal = $('averyBrandSelect')?.value || averyStudioState.selectedBrand;
+  if (!brandVal) {
+    alert('Please choose a brand from the dropdown to auto-add to the sheet.');
+    return;
+  }
+  const count = autoAddBrandToQueue(brandVal);
+  if (count === 0) {
+    alert(`No catalog items found matching brand "${brandVal}".`);
+  }
+});
+
+bindClick('btnAddCustomAveryLabel', () => {
+  const name = prompt('Enter item name for custom label:', 'Custom Retail Item');
+  if (!name) return;
+  const vol = prompt('Enter size/volume (e.g. 11oz, 1 L, 750ml, 12-Pack):', '750ml');
+  const price = prompt('Enter retail price (e.g. $14.99):', '$14.99');
+  addCustomAveryItem({ displayName: name, name, volume: vol, price });
+});
+
+bindClick('btnResetAveryQueue', () => {
+  initAveryQueue(true);
+  renderAveryLabelPreview();
+  postAiAnnouncement('↺ Reset Avery print sheet to all active catalog items.');
+});
+
+bindClick('btnClearAveryQueue', () => {
+  averyStudioState.printQueue = [];
+  renderAveryQueueTable();
+  renderAveryLabelPreview();
+  postAiAnnouncement('✕ Cleared all items from Avery print sheet.');
+});
+
+// Modal Save & Remove Handlers
+bindClick('btnSaveAveryEditModal', () => {
+  const id = $('editAveryItemId')?.value;
+  if (!id) return;
+
+  const name = $('editAveryItemName')?.value;
+  const volume = $('editAveryItemVolume')?.value;
+  const price = $('editAveryItemPrice')?.value;
+  const barcode = $('editAveryItemBarcode')?.value;
+  const brand = $('editAveryItemBrand')?.value;
+  const copies = $('editAveryItemCopies')?.value;
+
+  editAveryQueueItem(id, {
+    displayName: name,
+    name,
+    volume,
+    price,
+    barcode,
+    brand,
+    copies: Number(copies) || 1
+  });
+
+  closeAveryEditModal();
+});
+
+bindClick('btnRemoveAveryEditModal', () => {
+  const id = $('editAveryItemId')?.value;
+  if (id) {
+    removeAveryQueueItem(id);
+  }
+  closeAveryEditModal();
+});
+
+bindClick('btnCloseAveryEditModal', () => {
+  closeAveryEditModal();
+});
+
+bindClick('btnCloseAveryEditModalX', () => {
+  closeAveryEditModal();
+});
+
+const averyFilter = $('averyItemFilterSelect');
+if (averyFilter) {
+  averyFilter.addEventListener('change', (e) => {
+    const val = e.target.value;
+    if (val === 'all') {
+      averyStudioState.filterCategory = 'all';
+      averyStudioState.filterStatus = 'all';
+    } else if (val === 'approved') {
+      averyStudioState.filterCategory = 'all';
+      averyStudioState.filterStatus = 'approved';
+    } else {
+      averyStudioState.filterCategory = val;
+      averyStudioState.filterStatus = 'all';
+    }
+    initAveryQueue(true);
+    averyStudioState.currentSheet = 1;
+    renderAveryLabelPreview();
+  });
+}
+
+const averyStartSlot = $('averyStartSlotInput');
+if (averyStartSlot) {
+  averyStartSlot.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value, 10);
+    averyStudioState.startSlot = isNaN(val) ? 1 : Math.max(1, val);
+    renderAveryLabelPreview();
+  });
+}
+
+const averyCopies = $('averyCopiesInput');
+if (averyCopies) {
+  averyCopies.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value, 10);
+    averyStudioState.copies = isNaN(val) ? 1 : Math.max(1, Math.min(20, val));
+    renderAveryLabelPreview();
+  });
+}
+
+const averyGuideCheck = $('averyShowBordersCheck');
+if (averyGuideCheck) {
+  averyGuideCheck.addEventListener('change', (e) => {
+    averyStudioState.showGuide = e.target.checked;
+    renderAveryLabelPreview();
+  });
+}
+
+const logoFileInput = $('averyLogoFileInput');
+if (logoFileInput) {
+  logoFileInput.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        if (evt.target?.result) {
+          averyStudioState.logoUrl = evt.target.result;
+          renderAveryLabelPreview();
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+}
+
+bindClick('btnResetAveryLogo', () => {
+  averyStudioState.logoUrl = DEFAULT_STORE_LOGO_SVG;
+  renderAveryLabelPreview();
+});
+
+bindClick('btnAveryPrevSheet', () => {
+  if (averyStudioState.currentSheet > 1) {
+    averyStudioState.currentSheet--;
+    renderAveryLabelPreview();
+  }
+});
+
+bindClick('btnAveryNextSheet', () => {
+  averyStudioState.currentSheet++;
+  renderAveryLabelPreview();
+});
+
+bindClick('btnPrintAveryLabels', () => {
+  renderAveryLabelPreview();
+  window.print();
+});
+
+// Initial boot for Avery Price Tag Studio
+if (typeof window !== 'undefined') {
+  initAveryQueue(false);
+  renderAveryLabelPreview();
+}

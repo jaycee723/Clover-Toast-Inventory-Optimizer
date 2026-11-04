@@ -366,3 +366,101 @@ export async function showGooglePicker(accessToken, onPicked) {
 
   picker.setVisible(true);
 }
+
+// ---------------- Google Drive Folder Navigation Tree ----------------
+
+function formatBytes(bytes) {
+  if (!bytes || isNaN(bytes)) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Lists contents of a Google Drive folder for the hierarchical folder tree.
+ * Returns folders first, followed by spreadsheet, CSV, and data files.
+ */
+export async function listDriveFolderContents(accessToken, folderId = 'root') {
+  const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+  const fields = encodeURIComponent('nextPageToken, files(id, name, mimeType, iconLink, modifiedTime, size)');
+  const res = await googleFetch(
+    `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&orderBy=folder desc,name asc&pageSize=100`,
+    accessToken
+  );
+  const data = await res.json();
+  const files = (data.files || []).map((f) => {
+    const isFolder = f.mimeType === 'application/vnd.google-apps.folder';
+    const isGoogleSheet = f.mimeType === 'application/vnd.google-apps.spreadsheet';
+    const isCsv = f.name?.toLowerCase().endsWith('.csv') || f.mimeType === 'text/csv';
+    const isXlsx = f.name?.toLowerCase().endsWith('.xlsx') || f.name?.toLowerCase().endsWith('.xls');
+    const isSupportedInventory = isGoogleSheet || isCsv || isXlsx;
+
+    return {
+      id: f.id,
+      name: f.name || 'Untitled',
+      mimeType: f.mimeType,
+      isFolder,
+      isGoogleSheet,
+      isCsv,
+      isXlsx,
+      isSupportedInventory,
+      sizeFormatted: f.size ? formatBytes(Number(f.size)) : '',
+      modifiedFormatted: f.modifiedTime ? new Date(f.modifiedTime).toLocaleDateString() : '',
+      iconLink: f.iconLink || ''
+    };
+  });
+
+  return {
+    folderId,
+    files,
+    nextPageToken: data.nextPageToken || null
+  };
+}
+
+/**
+ * Downloads a spreadsheet or CSV file from Google Drive.
+ * Automatically exports native Google Sheets to CSV.
+ */
+export async function downloadDriveSpreadsheetOrCsv(accessToken, file) {
+  const { id, name, mimeType, isGoogleSheet } = file;
+
+  if (isGoogleSheet || mimeType === 'application/vnd.google-apps.spreadsheet') {
+    // Export Google Sheet to CSV
+    const res = await googleFetch(
+      `https://docs.google.com/spreadsheets/d/${id}/export?format=csv`,
+      accessToken
+    );
+    const csvText = await res.text();
+    return {
+      format: 'csv',
+      data: csvText,
+      filename: name.toLowerCase().endsWith('.csv') ? name : `${name}.csv`
+    };
+  }
+
+  // Handle binary XLSX / XLS
+  if (name.toLowerCase().endsWith('.xlsx') || name.toLowerCase().endsWith('.xls')) {
+    const res = await googleFetch(
+      `https://www.googleapis.com/drive/v3/files/${id}?alt=media`,
+      accessToken
+    );
+    const buffer = await res.arrayBuffer();
+    return {
+      format: 'xlsx',
+      data: buffer,
+      filename: name
+    };
+  }
+
+  // Handle standard text CSV
+  const res = await googleFetch(
+    `https://www.googleapis.com/drive/v3/files/${id}?alt=media`,
+    accessToken
+  );
+  const text = await res.text();
+  return {
+    format: 'csv',
+    data: text,
+    filename: name
+  };
+}

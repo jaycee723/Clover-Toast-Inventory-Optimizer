@@ -1727,3 +1727,599 @@ tr:hover td {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ==========================================================================
+   Google Drive Folder Navigation Explorer Modal
+   ========================================================================== */
+.drive-crumb-btn {
+  background: none;
+  border: none;
+  color: #60a5fa;
+  cursor: pointer;
+  padding: 3px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+.drive-crumb-btn:hover {
+  background: rgba(96, 165, 250, 0.15);
+  text-decoration: underline;
+}
+.drive-crumb-sep {
+  color: #64748b;
+  font-size: 12px;
+}
+.drive-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  border: 1px solid transparent;
+}
+.drive-item-row:hover {
+  background: #1e293b;
+  border-color: #334155;
+}
+.drive-item-row.selected {
+  background: #1e3a8a;
+  border-color: #3b82f6;
+}
+.drive-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.drive-item-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.drive-item-name {
+  font-size: 13px;
+  color: #f1f5f9;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drive-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+.drive-badge-sheet {
+  background: #065f46;
+  color: #a7f3d0;
+  border: 1px solid #059669;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.drive-badge-csv {
+  background: #1e3a8a;
+  color: #bfdbfe;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.drive-badge-excel {
+  background: #14532d;
+  color: #bbf7d0;
+  border: 1px solid #22c55e;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   Avery Price Tag & Sticker Label Printing Studio Widget
+   ========================================================================== */
+.avery-widget-section {
+  margin-top: 36px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+.avery-widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #1e293b;
+  margin-bottom: 20px;
+}
+
+.avery-widget-title-group {
+  flex: 1;
+  min-width: 280px;
+}
+
+.avery-widget-icon {
+  font-size: 26px;
+}
+
+.avery-widget-title {
+  margin: 0;
+  font-size: 20px;
+  color: #f8fafc;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.avery-widget-desc {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.5;
+  max-width: 780px;
+}
+
+.avery-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.avery-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.avery-label-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #e2e8f0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.avery-select, .avery-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  color: #f8fafc;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.avery-select:focus, .avery-input:focus {
+  outline: none;
+  border-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+.avery-spec-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.avery-logo-preview-box {
+  width: 60px;
+  height: 60px;
+  border-radius: 8px;
+  background: #0f172a;
+  border: 1px solid #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 4px;
+  flex-shrink: 0;
+}
+
+.avery-preview-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px 8px 0 0;
+}
+
+.avery-preview-viewport {
+  background: #334155;
+  border: 1px solid #475569;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  padding: 24px 16px;
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+}
+
+/* Scaled True-to-Proportion Sheet Representation */
+.avery-sheet-preview {
+  width: 612px; /* 8.5in @ 72dpi scale */
+  min-height: 792px; /* 11.0in @ 72dpi scale */
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+  border-radius: 2px;
+  box-sizing: border-box;
+  transform-origin: top center;
+  position: relative;
+  overflow: hidden;
+}
+
+.avery-preview-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.avery-preview-label {
+  background: #ffffff;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  position: relative;
+  border: 1px solid transparent;
+  transition: all 0.1s ease;
+}
+
+.avery-preview-label.show-guide {
+  border: 1px dashed #cbd5e1;
+}
+
+.avery-preview-label.offset-empty {
+  background: repeating-linear-gradient(
+    45deg,
+    #f8fafc,
+    #f8fafc 8px,
+    #f1f5f9 8px,
+    #f1f5f9 16px
+  );
+  border: 1px dashed #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avery-offset-hint {
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+
+/* Label Internal Arrangement: Logo Left, 3 Rows of Content Right (All 3 Rows Visible) */
+.avery-label-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.avery-label-logo-col {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.avery-label-logo-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.avery-label-content-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  overflow: hidden;
+  padding: 1px 0;
+}
+
+/* Row 1: Product Name */
+.avery-row-1, .avery-label-name-row {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  line-height: 1.15;
+}
+
+.avery-label-name {
+  font-weight: 800;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+/* Row 2: Volume / Size & Barcode (Normalized e.g. 11oz, 1 L) */
+.avery-row-2, .avery-label-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  line-height: 1.1;
+}
+
+.avery-label-vol-badge {
+  font-weight: 700;
+  color: #047857;
+  font-size: 0.85em;
+  flex-shrink: 0;
+  letter-spacing: -0.01em;
+  background: #ecfdf5;
+  padding: 0 3px;
+  border-radius: 3px;
+  border: 1px solid #a7f3d0;
+  line-height: 1.2;
+}
+
+.avery-label-barcode-small {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75em;
+  color: #475569;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Row 3: Large Retail Price */
+.avery-row-3, .avery-label-price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  line-height: 1;
+}
+
+.avery-label-price {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-weight: 900;
+  color: #0f172a;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.avery-preview-label:not(.offset-empty) {
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.avery-preview-label:not(.offset-empty):hover {
+  box-shadow: 0 0 0 1.5px #10b981;
+  background: #f0fdf4;
+}
+
+/* Avery Print Queue Manager & Editor Section */
+.avery-queue-section {
+  margin-top: 20px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.avery-queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #334155;
+}
+
+.avery-queue-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.avery-queue-table-container {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.avery-queue-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.avery-queue-table th {
+  background: #1e293b;
+  color: #94a3b8;
+  font-weight: 600;
+  text-align: left;
+  padding: 8px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid #334155;
+}
+
+.avery-queue-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #1e293b;
+  color: #e2e8f0;
+  vertical-align: middle;
+}
+
+.avery-queue-input {
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  color: #f8fafc;
+  padding: 4px 6px;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.avery-queue-input:focus {
+  outline: none;
+  border-color: #10b981;
+}
+
+.btn-remove-avery-item {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-remove-avery-item:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   PRINT MEDIA STYLES - Exact Physical Inkjet Alignment
+   ========================================================================== */
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 0;
+  }
+
+  /* Hide entire web application UI during print */
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  header, nav, .workspace-layout, #toastPreviewModal, #driveExplorerModal, #averyEditLabelModal,
+  .avery-widget-header, .avery-controls-grid, .avery-preview-toolbar, .avery-preview-viewport, .avery-queue-section {
+    display: none !important;
+  }
+
+  /* Show only the dedicated physical container */
+  .avery-print-only {
+    display: block !important;
+    width: 8.5in !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .avery-print-sheet {
+    width: 8.5in !important;
+    height: 11.0in !important;
+    box-sizing: border-box !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    position: relative !important;
+    overflow: hidden !important;
+  }
+
+  .avery-print-grid {
+    display: grid !important;
+    width: 100% !important;
+    height: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .avery-print-label {
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    display: flex !important;
+    align-items: stretch !important;
+    position: relative !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .avery-print-label .avery-label-inner {
+    display: flex !important;
+    align-items: stretch !important;
+    width: 100% !important;
+    height: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .avery-print-label .avery-label-content-col {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    height: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .avery-print-label .avery-label-vol-badge {
+    color: #047857 !important;
+    background: transparent !important;
+    border: 0.5pt solid #cbd5e1 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .avery-print-label.show-guide {
+    border: 0.5pt dashed #94a3b8 !important;
+  }
+
+  .avery-print-label.offset-empty {
+    visibility: hidden !important;
+  }
+}

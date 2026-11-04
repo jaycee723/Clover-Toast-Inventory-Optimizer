@@ -98,6 +98,9 @@
         <div class="flex-wrap" style="align-items:center;justify-content:space-between;margin-bottom:14px;">
           <div class="flex-wrap" style="align-items:center;gap:10px;">
             <button id="load" type="button" class="btn-secondary btn-sm">Read &amp; Load File</button>
+            <button id="btnImportGoogleDrive" type="button" class="btn-secondary btn-sm" style="display:inline-flex;align-items:center;gap:6px;background:#1e3a8a;border-color:#3b82f6;color:#ffffff;">
+              <span>📁 Import from Google Drive</span>
+            </button>
             <button id="btnLoadSample" type="button" class="btn-outline btn-sm">⚡ Load Sample 777 Liquor Store Catalog</button>
           </div>
           <div class="small text-muted" id="fileStatusSub">No file loaded yet</div>
@@ -628,6 +631,288 @@
     </aside>
   </div>
 
+  <!-- WIDGET: Avery Price Tag & Sticker Label Printing Studio -->
+  <section id="averyLabelWidget" class="avery-widget-section" aria-label="Avery Sticker Label Printing Studio">
+    <div class="avery-widget-header">
+      <div class="avery-widget-title-group">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span class="avery-widget-icon">🏷️</span>
+          <h2 class="avery-widget-title">Avery Price Tag &amp; Sticker Label Printing Studio</h2>
+          <span class="ai-badge" style="background:#059669;color:#fff;">Inkjet Pro</span>
+          <span id="averyTemplateBadge" class="status-pill" style="font-size:11px;color:#34d399;border-color:#059669;">Avery 5160 (30/Sheet)</span>
+        </div>
+        <p class="avery-widget-desc">
+          Print retail price tags, shelf-edge labels, and bottle stickers on standard Avery inkjet sheets. Formatted with your company logo on the left, standardized product names with volumes (e.g. <code>11oz</code>, <code>1 L</code>), and large bold prices scaled to Avery's exact physical millimeter &amp; inch specifications.
+        </p>
+      </div>
+      <div class="avery-header-actions">
+        <button id="btnPrintAveryLabels" type="button" class="btn-toast" style="background:#059669;padding:10px 20px;font-size:14px;box-shadow:0 4px 12px rgba(5,150,105,0.3);">
+          <span>🖨️ Print Labels Now</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Controls Grid: Template, Logo, Filter, Start Slot -->
+    <div class="avery-controls-grid">
+      <!-- 1. Avery Label Size Dropdown -->
+      <div class="avery-card">
+        <label class="avery-label-title" for="averyTemplateSelect">
+          <span>1. Avery Label Size (Inkjet / Laser)</span>
+          <span class="small text-muted" id="averyDimensionsText">2⅝″ × 1″ • 30/sheet</span>
+        </label>
+        <select id="averyTemplateSelect" class="avery-select">
+          <optgroup label="Standard Address &amp; Retail Price Tags">
+            <option value="5160" selected>Avery 5160 / 8160 / 94200 — 2⅝″ × 1″ (30/sheet, 3×10)</option>
+            <option value="5161">Avery 5161 / 8161 — 4″ × 1″ (20/sheet, 2×10)</option>
+          </optgroup>
+          <optgroup label="Shelf Tags &amp; Medium Product Labels">
+            <option value="5162">Avery 5162 / 8162 — 4″ × 1⅓″ (14/sheet, 2×7)</option>
+            <option value="5163">Avery 5163 / 8163 — 4″ × 2″ (10/sheet, 2×5)</option>
+            <option value="5164">Avery 5164 / 8164 — 4″ × 3⅓″ (6/sheet, 2×3)</option>
+          </optgroup>
+          <optgroup label="Slim Tags &amp; Bottle Neck Labels">
+            <option value="5167">Avery 5167 / 8167 / 94203 — 1¾″ × ½″ (80/sheet, 4×20)</option>
+          </optgroup>
+          <optgroup label="Square &amp; Round Specialty Stickers">
+            <option value="22806">Avery 22806 — Square 2″ × 2″ (12/sheet, 3×4)</option>
+            <option value="22807">Avery 22807 — Round 2″ Diameter (12/sheet, 3×4)</option>
+          </optgroup>
+          <optgroup label="Full Sheet Placards">
+            <option value="5165">Avery 5165 / 8165 — Full Sheet 8.5″ × 11″ (1/sheet)</option>
+          </optgroup>
+        </select>
+        <div class="avery-spec-details" id="averySpecDetails">
+          <span id="specMargins">Top: 0.5″ • Left: 0.1875″</span>
+          <span id="specPitch">Pitch: H 2.75″ × V 1.0″</span>
+        </div>
+      </div>
+
+      <!-- 2. Company Brand Logo -->
+      <div class="avery-card">
+        <label class="avery-label-title">
+          <span>2. Company / Brand Logo</span>
+          <span class="small text-muted">Displays large on left</span>
+        </label>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div id="averyLogoPreviewContainer" class="avery-logo-preview-box">
+            <img id="averyLogoImg" src="" alt="Brand Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex:1;">
+            <label class="btn-outline btn-sm" style="cursor:pointer;text-align:center;">
+              <span>📁 Upload Custom Logo</span>
+              <input id="averyLogoFileInput" type="file" accept="image/*" style="display:none;">
+            </label>
+            <button id="btnResetAveryLogo" type="button" class="btn-secondary btn-sm" style="font-size:11px;">
+              <span>↺ Reset to 777 Store Logo</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Brand Filter & Auto-Add -->
+      <div class="avery-card">
+        <label class="avery-label-title" for="averyBrandSelect">
+          <span>3. Filter by Brand &amp; Auto-Add</span>
+          <span class="small text-muted" id="averyBrandCountText">0 brands detected</span>
+        </label>
+        <div>
+          <span style="font-size:11px;color:#94a3b8;display:block;margin-bottom:3px;">Select Brand Name</span>
+          <select id="averyBrandSelect" class="avery-select" style="font-size:12px;padding:7px;">
+            <option value="">-- Choose Brand to Auto-Add --</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:2px;">
+          <button id="btnAutoAddBrandLabels" type="button" class="btn-toast btn-sm" style="flex:1;font-size:12px;background:#047857;padding:6px 10px;">
+            <span>⚡ Auto-Add Brand to Sheet</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 4. Items Source & Sheet Offset -->
+      <div class="avery-card">
+        <label class="avery-label-title">
+          <span>4. Sheet Options &amp; Reuse Offset</span>
+          <span class="small text-muted" id="averyFilteredCountText">0 items selected</span>
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div>
+            <span style="font-size:11px;color:#94a3b8;display:block;margin-bottom:3px;">Catalog Filter</span>
+            <select id="averyItemFilterSelect" class="avery-select" style="font-size:12px;padding:6px;">
+              <option value="all">All Catalog Items</option>
+              <option value="approved" selected>Toast-Ready / Approved Only</option>
+              <option value="Beer">Beer Only</option>
+              <option value="Wine">Wine Only</option>
+              <option value="Spirits">Spirits Only</option>
+              <option value="RTD">RTD Drinks Only</option>
+              <option value="Non-Alcoholic">Non-Alcoholic Only</option>
+            </select>
+          </div>
+          <div>
+            <span style="font-size:11px;color:#94a3b8;display:block;margin-bottom:3px;">Start Slot # (Reuse Sheets)</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input id="averyStartSlotInput" type="number" min="1" max="80" value="1" class="avery-input" style="width:70px;text-align:center;">
+              <span class="small text-muted" id="averyMaxSlotHint">of 30</span>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#cbd5e1;">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input id="averyShowBordersCheck" type="checkbox">
+            <span>Show alignment guide borders</span>
+          </label>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span>Copies:</span>
+            <input id="averyCopiesInput" type="number" min="1" max="20" value="1" class="avery-input" style="width:50px;text-align:center;padding:3px;">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Sheet Labels Queue & Item Editor -->
+    <div id="averyQueueSection" class="avery-queue-section">
+      <div class="avery-queue-header">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <strong style="color:#f8fafc;font-size:14px;display:flex;align-items:center;gap:6px;">
+            <span>📋 Active Sheet Print Queue</span>
+          </strong>
+          <span id="averyQueueCountBadge" class="status-pill ok" style="font-size:11px;">0 label items</span>
+          <span class="small text-muted">Edit names, volumes, or prices inline, or click ✕ to remove individual items.</span>
+        </div>
+        <div class="avery-queue-controls">
+          <button id="btnAddCustomAveryLabel" type="button" class="btn-secondary btn-sm" style="font-size:11px;">
+            <span>+ Add Custom Label</span>
+          </button>
+          <button id="btnResetAveryQueue" type="button" class="btn-outline btn-sm" style="font-size:11px;">
+            <span>↺ Reset to Catalog</span>
+          </button>
+          <button id="btnClearAveryQueue" type="button" class="btn-outline btn-sm" style="font-size:11px;color:#fca5a5;">
+            <span>✕ Clear Sheet</span>
+          </button>
+        </div>
+      </div>
+      <div class="avery-queue-table-container">
+        <table class="avery-queue-table">
+          <thead>
+            <tr>
+              <th style="width:36px;">#</th>
+              <th>Product Name</th>
+              <th style="width:110px;">Volume / Size</th>
+              <th style="width:100px;">Price</th>
+              <th style="width:130px;">Barcode / UPC</th>
+              <th style="width:65px;">Copies</th>
+              <th style="width:110px;">Brand</th>
+              <th style="width:75px;text-align:center;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="averyQueueTableBody">
+            <!-- Dynamically populated queue items -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Sheet Preview Pagination Toolbar -->
+    <div class="avery-preview-toolbar" style="margin-top:20px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <strong style="color:#f8fafc;font-size:13px;">Live Sheet Preview (US Letter 8.5″ × 11″)</strong>
+        <span id="averySheetSummaryBadge" class="status-pill" style="font-size:11px;">Sheet 1 of 1 (0 tags)</span>
+        <span class="small text-muted" style="font-size:11px;">💡 Click any label below to quickly edit or delete it</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="btnAveryPrevSheet" type="button" class="btn-outline btn-sm" disabled>◀ Prev Sheet</button>
+        <span id="averySheetPageIndicator" class="small text-muted" style="min-width:70px;text-align:center;">1 / 1</span>
+        <button id="btnAveryNextSheet" type="button" class="btn-outline btn-sm" disabled>Next Sheet ▶</button>
+      </div>
+    </div>
+
+    <!-- Interactive WYSIWYG Print Preview Sheet Container -->
+    <div class="avery-preview-viewport">
+      <div id="averyPreviewSheet" class="avery-sheet-preview">
+        <!-- Dynamically populated label grid matching exact Avery geometry -->
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Edit Modal for Individual Label Items -->
+  <div id="averyEditLabelModal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="averyEditModalTitle">
+    <div class="modal-box" style="max-width:480px;">
+      <div class="modal-header-row">
+        <div>
+          <h3 id="averyEditModalTitle" style="margin:0 0 4px 0;font-size:16px;color:#ffffff;display:flex;align-items:center;gap:8px;">
+            <span>✏️ Edit Label Item</span>
+          </h3>
+          <p class="small text-muted" style="margin:0;">
+            Adjust details for this printed price sticker. All 3 rows will update on the sheet.
+          </p>
+        </div>
+        <button id="btnCloseAveryEditModalX" type="button" class="modal-close-btn" aria-label="Close modal">✕</button>
+      </div>
+
+      <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;">
+        <input id="editAveryItemId" type="hidden">
+        <div>
+          <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="editAveryItemName">
+            Row 1: Product Name
+          </label>
+          <input id="editAveryItemName" type="text" class="avery-input" placeholder="e.g. Bud Light">
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="editAveryItemVolume">
+              Row 2: Volume / Size
+            </label>
+            <input id="editAveryItemVolume" type="text" class="avery-input" placeholder="e.g. 11oz, 1 L, 750ml">
+            <span class="small text-muted" style="font-size:10px;">Format: 11oz, 1 L, 12-Pack</span>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="editAveryItemPrice">
+              Row 3: Large Retail Price
+            </label>
+            <input id="editAveryItemPrice" type="text" class="avery-input" placeholder="$14.99">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="editAveryItemBarcode">
+              Barcode / UPC
+            </label>
+            <input id="editAveryItemBarcode" type="text" class="avery-input" placeholder="018200530470">
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="editAveryItemBrand">
+              Brand Name
+            </label>
+            <input id="editAveryItemBrand" type="text" class="avery-input" placeholder="e.g. Bud Light">
+          </div>
+        </div>
+
+        <div>
+          <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="editAveryItemCopies">
+            Stickers to Print (Copies)
+          </label>
+          <input id="editAveryItemCopies" type="number" min="1" max="100" value="1" class="avery-input" style="width:100px;">
+        </div>
+      </div>
+
+      <div class="modal-footer-row" style="display:flex;justify-content:space-between;align-items:center;">
+        <button id="btnRemoveAveryEditModal" type="button" class="btn-outline btn-sm" style="color:#fca5a5;border-color:#ef4444;">
+          <span>🗑️ Remove from Sheet</span>
+        </button>
+        <div style="display:flex;gap:8px;">
+          <button id="btnCloseAveryEditModal" type="button" class="btn-secondary btn-sm">Cancel</button>
+          <button id="btnSaveAveryEditModal" type="button" class="btn-toast btn-sm" style="background:#059669;">
+            <span>✓ Save Changes</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden Dedicated Printable Container for @media print -->
+  <div id="averyPrintContainer" class="avery-print-only" aria-hidden="true"></div>
+
   <!-- Toast CSV Preview Modal with Summary Row -->
   <div id="toastPreviewModal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="toastPreviewTitle">
     <div class="modal-box modal-box-large">
@@ -670,6 +955,72 @@
           </button>
           <button id="modalConfirmDlToast" type="button" class="btn-toast">
             <span>⬇️ Confirm &amp; Download File</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Drive Folder Navigation Explorer Modal -->
+  <div id="driveExplorerModal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="driveExplorerTitle">
+    <div class="modal-box modal-box-large" style="max-width:850px;">
+      <div class="modal-header-row">
+        <div>
+          <h2 id="driveExplorerTitle" class="modal-title" style="margin:0;display:flex;align-items:center;gap:10px;">
+            <span>📁 Google Drive Inventory Explorer</span>
+            <span class="app-title-badge" style="background:#1e3a8a;color:#93c5fd;">Cloud Storage</span>
+          </h2>
+          <p class="small text-muted" style="margin:4px 0 0 0;">
+            Traverse your Google Drive folders and select a Clover or POS inventory spreadsheet (.csv, .xlsx, or Google Sheet) to import directly.
+          </p>
+        </div>
+        <button id="modalCloseDriveExplorer" type="button" class="ai-drawer-close" aria-label="Close Explorer">✕</button>
+      </div>
+
+      <!-- Drive Auth Warning (if not signed in) -->
+      <div id="driveAuthNotice" style="display:none;background:#1e293b;border:1px solid #3b82f6;border-radius:8px;padding:14px;margin:12px 0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <div>
+            <strong style="color:#93c5fd;font-size:14px;">Google Sign-In Required</strong>
+            <p style="margin:4px 0 0;font-size:12px;color:#cbd5e1;">
+              Sign in with your Google account to grant access to view and import your Google Drive inventory spreadsheets.
+            </p>
+          </div>
+          <button id="btnDriveSignIn" type="button" class="btn-toast btn-sm" style="background:#2563eb;">
+            <span>Sign in with Google</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Breadcrumbs & Search Toolbar -->
+      <div class="drive-explorer-toolbar" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;flex-wrap:wrap;">
+        <nav id="driveBreadcrumbs" class="drive-breadcrumbs" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#cbd5e1;flex-wrap:wrap;">
+          <button type="button" class="drive-crumb-btn" data-folder-id="root">My Drive</button>
+        </nav>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input id="driveSearchInput" type="search" placeholder="Filter files in folder…" style="padding:6px 10px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:12px;width:180px;">
+          <button id="btnRefreshDriveFolder" type="button" class="btn-outline btn-sm" title="Refresh folder contents">🔄</button>
+        </div>
+      </div>
+
+      <!-- File & Folder List -->
+      <div id="driveItemsContainer" class="drive-items-scroll" style="min-height:280px;max-height:360px;overflow-y:auto;border:1px solid #334155;border-radius:8px;background:#0f172a;padding:4px;">
+        <div id="driveLoadingSpinner" style="display:none;padding:30px;text-align:center;color:#94a3b8;">
+          <div class="spinner" style="margin:0 auto 10px;"></div>
+          <span>Loading Google Drive folder…</span>
+        </div>
+        <div id="driveItemsList" style="display:flex;flex-direction:column;gap:2px;"></div>
+        <div id="driveEmptyState" style="display:none;padding:40px;text-align:center;color:#64748b;font-size:13px;">
+          No supported inventory spreadsheets found in this folder.
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <span id="driveSelectedFileInfo" class="small text-muted">No file selected</span>
+        <div class="flex-wrap" style="gap:8px;">
+          <button id="modalCancelDrive" type="button" class="btn-secondary btn-sm">Cancel</button>
+          <button id="btnConfirmDriveImport" type="button" class="btn-toast btn-sm" disabled style="background:#2563eb;">
+            <span>📥 Import Selected File</span>
           </button>
         </div>
       </div>
