@@ -451,6 +451,22 @@
               <button id="btnDlOnboarding" type="button" class="btn-toast" style="background:#2563eb;">⬇️ Download Consultant Template</button>
             </div>
           </div>
+
+          <!-- Card 3: Avery Sticker Price Tag Maker -->
+          <div class="export-card" style="border-color:#059669;background:linear-gradient(180deg,#0a1b18 0%,#081412 100%);">
+            <div>
+              <h3 class="export-card-title">
+                <span style="color:#34d399;">🏷️ Avery Price Tag &amp; Sticker Studio</span>
+                <span class="status-pill ok" style="font-size:10px;padding:2px 8px;">Individual Brand Logos</span>
+              </h3>
+              <p class="export-card-desc">
+                Automatically import your sanitized catalog with normalized volumes (<code>11oz</code>, <code>1 L</code>, <code>750ml</code>) and print custom Avery inkjet price stickers with individual brand logos on each sticker.
+              </p>
+            </div>
+            <div class="flex-wrap" style="gap:8px;">
+              <button id="btnSendCleanedToTagMaker" type="button" class="btn-toast" style="background:#059669;font-weight:700;">🏷️ Send Cleaned Items to Tag Maker</button>
+            </div>
+          </div>
         </div>
 
         <!-- Embedded Toast Consultant Guidance Card (Referencing Attached 777 Template) -->
@@ -652,8 +668,55 @@
       </div>
     </div>
 
-    <!-- Controls Grid: Template, Logo, Filter, Start Slot -->
-    <div class="avery-controls-grid">
+    <!-- Sub-Tabs Navigation: Label Printing vs Brand & Logo Manager -->
+    <div class="avery-subtabs-bar">
+      <button id="tabAveryPrintBtn" type="button" class="avery-tab-btn active">
+        <span>🖨️ Label Printing Studio</span>
+      </button>
+      <button id="tabAveryBrandsBtn" type="button" class="avery-tab-btn">
+        <span>🏷️ Brand &amp; Logo Manager</span>
+        <span id="tabBrandCountBadge" class="status-pill" style="font-size:10px;padding:1px 6px;">0</span>
+      </button>
+    </div>
+
+    <!-- Tab 1 View: Avery Label Printing Studio View -->
+    <div id="averyPrintView">
+      <!-- Avery Saved Layouts Bar (Cloud Firestore + Presets) -->
+      <div class="avery-layouts-bar">
+        <div class="avery-layouts-left">
+          <label for="averySavedLayoutsSelect" style="font-size:12px;font-weight:600;color:#94a3b8;display:flex;align-items:center;gap:6px;">
+            <span>📁 Label Configuration:</span>
+          </label>
+          <select id="averySavedLayoutsSelect" class="avery-layout-select" aria-label="Select Avery label layout configuration">
+            <optgroup label="Standard Built-in Presets">
+              <option value="preset_weekly_shelf_tags" selected>🏷️ Weekly Shelf Tags (5160, 30/sheet)</option>
+              <option value="preset_new_product_launch">✨ New Product Launch Stickers (5162, 14/sheet)</option>
+              <option value="preset_clearance_blowout">🔥 Clearance &amp; Promo Labels (5161, 20/sheet)</option>
+              <option value="preset_bottle_neck_tags">🍾 Bottle Neck &amp; Return Tags (5167, 80/sheet)</option>
+            </optgroup>
+            <optgroup id="averyUserLayoutsOptgroup" label="Your Cloud Saved Layouts">
+              <!-- Dynamically populated from Cloud Firestore -->
+            </optgroup>
+          </select>
+          <span id="activeLayoutBadge" class="avery-active-badge">
+            <span style="font-size:10px;">●</span> Active: Weekly Shelf Tags
+          </span>
+        </div>
+        <div class="avery-layouts-right">
+          <button id="btnSaveCurrentLayout" type="button" class="btn-toast btn-sm" style="background:#059669;font-size:12px;" title="Save current sheet settings and items into Cloud Firestore">
+            <span>💾 Save Current Layout</span>
+          </button>
+          <button id="btnDeleteCurrentLayout" type="button" class="btn-outline btn-sm" style="font-size:12px;color:#fca5a5;border-color:#ef4444;display:none;" title="Delete this custom layout from Cloud Firestore">
+            <span>🗑️ Delete</span>
+          </button>
+          <button id="btnSyncLayoutsCloud" type="button" class="btn-outline btn-sm" style="font-size:12px;" title="Sync layouts with Cloud Firestore">
+            <span>↺ Cloud Sync</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Controls Grid: Template, Logo, Filter, Start Slot -->
+      <div class="avery-controls-grid">
       <!-- 1. Avery Label Size Dropdown -->
       <div class="avery-card">
         <label class="avery-label-title" for="averyTemplateSelect">
@@ -831,7 +894,86 @@
         <!-- Dynamically populated label grid matching exact Avery geometry -->
       </div>
     </div>
+    </div> <!-- /#averyPrintView -->
+
+    <!-- Tab 2 View: Brand & Logo Manager View -->
+    <div id="averyBrandsView" style="display:none;">
+      <div class="avery-brands-toolbar">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <input id="averyBrandSearchInput" type="search" placeholder="🔍 Search brands..." class="avery-input" style="max-width:200px;font-size:12px;padding:6px 10px;">
+          <span id="brandStatsSummary" class="small text-muted">0 brands detected • 0 logos saved</span>
+        </div>
+        <div class="avery-brands-actions">
+          <button id="btnAutoFetchAllLogos" type="button" class="btn-toast btn-sm" style="background:#4338ca;font-size:12px;">
+            <span>🌐 Auto-Fetch Missing with Gemini</span>
+          </button>
+          <button id="btnSaveBrandsToCloud" type="button" class="btn-toast btn-sm" style="background:#059669;font-size:12px;">
+            <span>💾 Save to Cloud</span>
+          </button>
+          <button id="btnRefreshBrandsFromCloud" type="button" class="btn-outline btn-sm" style="font-size:12px;">
+            <span>↺ Refresh</span>
+          </button>
+          <button id="btnImportCleanedToBrands" type="button" class="btn-secondary btn-sm" style="font-size:12px;">
+            <span>📥 Import Cleaned Items</span>
+          </button>
+          <button id="btnOpenAddBrandModal" type="button" class="btn-secondary btn-sm" style="font-size:12px;">
+            <span>+ Add Brand</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Brand Notice / Status Bar -->
+      <div id="averyBrandStatusNotice" style="display:none;background:#1e293b;border:1px solid #3b82f6;border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:12px;color:#93c5fd;"></div>
+
+      <!-- Brand Cards Grid -->
+      <div id="averyBrandCardsGrid" class="avery-brand-cards-grid">
+        <!-- Dynamically rendered brand cards -->
+      </div>
+    </div>
   </section>
+
+  <!-- Add Custom Brand Modal -->
+  <div id="averyAddBrandModal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="addBrandModalTitle">
+    <div class="modal-box" style="max-width:440px;">
+      <div class="modal-header-row">
+        <div>
+          <h3 id="addBrandModalTitle" style="margin:0 0 4px 0;font-size:16px;color:#ffffff;display:flex;align-items:center;gap:8px;">
+            <span>🏷️ Add Brand &amp; Logo</span>
+          </h3>
+          <p class="small text-muted" style="margin:0;">
+            Attach a custom or auto-fetched logo for printed price stickers.
+          </p>
+        </div>
+        <button id="btnCloseAddBrandModalX" type="button" class="modal-close-btn" aria-label="Close modal">✕</button>
+      </div>
+
+      <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="inputNewBrandName">
+            Brand Name *
+          </label>
+          <input id="inputNewBrandName" type="text" class="avery-input" placeholder="e.g. Lost Coast Brewery">
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="inputNewBrandCategory">
+            Product Category (Optional)
+          </label>
+          <input id="inputNewBrandCategory" type="text" class="avery-input" placeholder="e.g. Beer, Spirits, Wine">
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="inputNewBrandLogoUrl">
+            Direct Logo Image URL (Optional)
+          </label>
+          <input id="inputNewBrandLogoUrl" type="url" class="avery-input" placeholder="https://.../logo.png">
+        </div>
+      </div>
+
+      <div class="modal-footer-row" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #334155;">
+        <button id="btnCloseAddBrandModal" type="button" class="btn-outline btn-sm">Cancel</button>
+        <button id="btnSubmitAddBrand" type="button" class="btn-toast btn-sm" style="background:#059669;">Save Brand</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Quick Edit Modal for Individual Label Items -->
   <div id="averyEditLabelModal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="averyEditModalTitle">
@@ -906,6 +1048,49 @@
             <span>✓ Save Changes</span>
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save Avery Layout Modal -->
+  <div id="averySaveLayoutModal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="averySaveLayoutModalTitle">
+    <div class="modal-box" style="max-width:460px;">
+      <div class="modal-header-row">
+        <div>
+          <h3 id="averySaveLayoutModalTitle" style="margin:0 0 4px 0;font-size:16px;color:#ffffff;display:flex;align-items:center;gap:8px;">
+            <span>💾 Save Avery Label Layout</span>
+          </h3>
+          <p class="small text-muted" style="margin:0;">
+            Save your current label template, filters, copies, and items to Cloud Firestore.
+          </p>
+        </div>
+        <button id="btnCloseSaveLayoutModalX" type="button" class="modal-close-btn" aria-label="Close modal">✕</button>
+      </div>
+
+      <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;" for="inputSaveLayoutName">
+            Layout Name *
+          </label>
+          <input id="inputSaveLayoutName" type="text" class="avery-input" placeholder="e.g. Weekly Shelf Tags, Craft Beer Tags" maxlength="128">
+        </div>
+
+        <div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;font-size:12px;color:#cbd5e1;">
+          <div style="font-weight:600;margin-bottom:6px;color:#f8fafc;">Snapshot Summary to Save:</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;">
+            <div>Template: <strong id="saveLayoutModalTemplateText" style="color:#34d399;">Avery 5160</strong></div>
+            <div>Queue Items: <strong id="saveLayoutModalItemsCount" style="color:#60a5fa;">0 items</strong></div>
+            <div>Copies per Item: <strong id="saveLayoutModalCopiesText">1</strong></div>
+            <div>Start Slot: <strong id="saveLayoutModalSlotText">Slot #1</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer-row" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #334155;">
+        <button id="btnCloseSaveLayoutModal" type="button" class="btn-outline btn-sm">Cancel</button>
+        <button id="btnConfirmSaveLayout" type="button" class="btn-toast btn-sm" style="background:#059669;">
+          <span>✓ Save to Cloud</span>
+        </button>
       </div>
     </div>
   </div>

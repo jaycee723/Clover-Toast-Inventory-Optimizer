@@ -80,6 +80,134 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "brand": {
+      "title": "BrandLogoProfile",
+      "description": "User brand configuration containing custom or auto-fetched brand logo",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Brand unique slug/ID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Brand display name",
+          "maxLength": 128
+        },
+        "logoUrl": {
+          "type": "string",
+          "description": "Brand logo image URL or SVG data URI",
+          "maxLength": 1000000
+        },
+        "source": {
+          "type": "string",
+          "description": "Logo source (upload, gemini, or default)",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of last update"
+        }
+      },
+      "required": ["id", "userId", "name", "logoUrl", "updatedAt"]
+    },
+    "persistentCatalog": {
+      "title": "PersistentCatalogSnapshot",
+      "description": "Persisted cleaned inventory catalog items recalled for label making",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Catalog document ID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Catalog title or source file name",
+          "maxLength": 128
+        },
+        "itemsJson": {
+          "type": "string",
+          "description": "Serialized cleaned catalog items array",
+          "maxLength": 5000000
+        },
+        "itemCount": {
+          "type": "number",
+          "description": "Total items count"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last save timestamp"
+        }
+      },
+      "required": ["id", "userId", "name", "itemsJson", "itemCount", "updatedAt"]
+    },
+    "averyLayout": {
+      "title": "AveryLabelLayout",
+      "description": "Saved Avery label configuration and print layout profile (e.g. Weekly Shelf Tags, New Product Launch)",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Layout document ID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Layout configuration name (e.g., Weekly Shelf Tags)",
+          "maxLength": 128
+        },
+        "templateId": {
+          "type": "string",
+          "description": "Avery template ID (e.g., 5160, 5161, 5162, etc.)",
+          "maxLength": 32
+        },
+        "configJson": {
+          "type": "string",
+          "description": "Serialized configuration parameters, options, and queue items",
+          "maxLength": 2000000
+        },
+        "itemCount": {
+          "type": "number",
+          "description": "Total labels in this layout configuration"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "userId", "name", "templateId", "configJson", "itemCount", "updatedAt"]
     }
   },
   "firestore": {
@@ -94,6 +222,24 @@
         "$ref": "#/entities/session"
       },
       "description": "User inventory review sessions storage"
+    },
+    "/users/{userId}/brands/{brandId}": {
+      "schema": {
+        "$ref": "#/entities/brand"
+      },
+      "description": "User-managed brand profiles with individual logos"
+    },
+    "/users/{userId}/catalog/{catalogId}": {
+      "schema": {
+        "$ref": "#/entities/persistentCatalog"
+      },
+      "description": "Persistent memory storage for cleaned inventory items recalled in tag maker"
+    },
+    "/users/{userId}/layouts/{layoutId}": {
+      "schema": {
+        "$ref": "#/entities/averyLayout"
+      },
+      "description": "Saved Avery label layout configurations for quick switching"
     }
   }
 }

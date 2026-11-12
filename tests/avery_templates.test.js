@@ -303,3 +303,70 @@ test('calculateAverySheetSlots formats all 3 visible rows and preserves individu
   assert.equal(resAfterRemove.sheets[0].slots[1].isOffsetEmpty, true);
 });
 
+test('generateBrandedVectorLogo creates authentic vector SVG data URIs for individual brands', async () => {
+  const { generateBrandedVectorLogo } = await import('../src/avery_templates.js');
+
+  // 1. Preset brand: Bud Light
+  const budLightLogo = generateBrandedVectorLogo('Bud Light', 'Beer');
+  assert.ok(budLightLogo.startsWith('data:image/svg+xml;utf8,'));
+  const decodedBL = decodeURIComponent(budLightLogo.replace('data:image/svg+xml;utf8,', ''));
+  assert.ok(decodedBL.includes('<svg'));
+  assert.ok(decodedBL.includes('BL'));
+  assert.ok(decodedBL.includes('Bud Light'));
+
+  // 2. Preset brand: Tito's
+  const titosLogo = generateBrandedVectorLogo("Tito's", 'Liquor');
+  const decodedTitos = decodeURIComponent(titosLogo.replace('data:image/svg+xml;utf8,', ''));
+  assert.ok(decodedTitos.includes("TITO'S"));
+
+  // 3. Preset brand: Casamigos
+  const casaLogo = generateBrandedVectorLogo('Casamigos', 'Liquor');
+  const decodedCasa = decodeURIComponent(casaLogo.replace('data:image/svg+xml;utf8,', ''));
+  assert.ok(decodedCasa.includes('CASA'));
+
+  // 4. Craft/unlisted brand: deterministic generation
+  const craftLogo1 = generateBrandedVectorLogo('Lost Coast Brewery', 'Craft Beer');
+  const craftLogo2 = generateBrandedVectorLogo('Lost Coast Brewery', 'Craft Beer');
+  assert.equal(craftLogo1, craftLogo2, 'Deterministic palette must match for the same brand');
+});
+
+test('calculateAverySheetSlots maps individual brand logos to each label slot', async () => {
+  const { generateBrandedVectorLogo } = await import('../src/avery_templates.js');
+
+  const customLogos = new Map([
+    ['tito\'s', 'https://example.com/titos-official.png'],
+    ['bud light', 'https://example.com/budlight-official.png']
+  ]);
+
+  const items = [
+    { id: '1', current_name: 'Bud Light 12oz', brand: 'Bud Light', price: '14.99' },
+    { id: '2', current_name: 'Titos Vodka 1.75 L', brand: "Tito's", price: '29.99' },
+    { id: '3', current_name: 'Casamigos Blanco 750ml', brand: 'Casamigos', price: '54.99' }
+  ];
+
+  const result = calculateAverySheetSlots('5160', items, {
+    startSlot: 1,
+    brandLogos: customLogos
+  });
+
+  const slots = result.sheets[0].slots;
+
+  // Slot 1: Bud Light -> custom URL
+  assert.equal(slots[0].item.displayName, 'Bud Light');
+  assert.equal(slots[0].item.brand, 'Bud Light');
+  assert.equal(slots[0].item.logoUrl, 'https://example.com/budlight-official.png');
+
+  // Slot 2: Tito's -> custom URL
+  assert.equal(slots[1].item.displayName, 'Titos Vodka');
+  assert.equal(slots[1].item.brand, "Tito's");
+  assert.equal(slots[1].item.logoUrl, 'https://example.com/titos-official.png');
+
+  // Slot 3: Casamigos -> fallback to branded vector SVG badge
+  assert.equal(slots[2].item.displayName, 'Casamigos Blanco');
+  assert.equal(slots[2].item.brand, 'Casamigos');
+  assert.ok(slots[2].item.logoUrl.startsWith('data:image/svg+xml;utf8,'));
+  const decoded = decodeURIComponent(slots[2].item.logoUrl.replace('data:image/svg+xml;utf8,', ''));
+  assert.ok(decoded.includes('CASA'));
+});
+
+

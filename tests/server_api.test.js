@@ -39,3 +39,18 @@ test('generateRuleBasedFormatting auto-categorizes liquor, beer, wine', () => {
   assert.equal(catChanges.find((c) => c.id === 'r2').proposedValue, 'Beer');
   assert.equal(catChanges.find((c) => c.id === 'r3').proposedValue, 'Wine');
 });
+
+test('generateBrandedVectorLogo provides authentic logos for major retail liquor and beer brands', async () => {
+  const { generateBrandedVectorLogo } = await import('../src/avery_templates.js');
+
+  const topBrands = ["Bud Light", "Tito's", "Casamigos", "Corona", "Guinness", "Heineken", "Jack Daniel's", "White Claw"];
+  for (const b of topBrands) {
+    const logoUri = generateBrandedVectorLogo(b);
+    assert.ok(logoUri.startsWith('data:image/svg+xml;utf8,'));
+    const decoded = decodeURIComponent(logoUri.replace('data:image/svg+xml;utf8,', ''));
+    assert.ok(decoded.includes('<svg'));
+    assert.ok(decoded.includes('width="200"'));
+    assert.ok(decoded.includes('height="200"'));
+  }
+});
+

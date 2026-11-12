@@ -284,6 +284,121 @@ export const AVERY_TEMPLATES = {
 export const DEFAULT_STORE_LOGO_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"><rect width="200" height="200" rx="24" fill="%230f172a"/><circle cx="100" cy="100" r="88" fill="none" stroke="%23f59e0b" stroke-width="6"/><path d="M60 48 L140 48 L108 92 L108 140 L92 140 L92 92 Z" fill="%23f8fafc" stroke="%23f59e0b" stroke-width="4"/><circle cx="100" cy="74" r="14" fill="%23ef4444"/><text x="100" y="172" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="900" fill="%23f59e0b" text-anchor="middle" letter-spacing="3">777 LIQUOR</text></svg>`;
 
 /**
+ * Specialized color schemes and iconography for top beverage & retail brands.
+ */
+const BRAND_PRESET_PALETTES = {
+  'bud light': { bg: '#002855', accent: '#00a3e0', text: '#ffffff', motif: 'beer', badge: 'BL' },
+  'budweiser': { bg: '#b91c1c', accent: '#fbbf24', text: '#ffffff', motif: 'crown', badge: 'BUD' },
+  'coors light': { bg: '#334155', accent: '#dc2626', text: '#ffffff', motif: 'mountain', badge: 'COORS' },
+  'miller lite': { bg: '#1e293b', accent: '#fbbf24', text: '#ffffff', motif: 'crest', badge: 'LITE' },
+  'corona': { bg: '#002855', accent: '#f59e0b', text: '#ffffff', motif: 'crown', badge: 'CORONA' },
+  'corona extra': { bg: '#002855', accent: '#f59e0b', text: '#ffffff', motif: 'crown', badge: 'CORONA' },
+  'modelo': { bg: '#0f172a', accent: '#fbbf24', text: '#ffffff', motif: 'crest', badge: 'MODELO' },
+  'modelo especial': { bg: '#0f172a', accent: '#fbbf24', text: '#ffffff', motif: 'crest', badge: 'MODELO' },
+  'heineken': { bg: '#007a33', accent: '#dc2626', text: '#ffffff', motif: 'star', badge: 'HEINEKEN' },
+  'guinness': { bg: '#000000', accent: '#d4af37', text: '#ffffff', motif: 'harp', badge: 'GUINNESS' },
+  'stella artois': { bg: '#991b1b', accent: '#eab308', text: '#ffffff', motif: 'star', badge: 'STELLA' },
+  'white claw': { bg: '#1e293b', accent: '#06b6d4', text: '#ffffff', motif: 'wave', badge: 'CLAW' },
+  'high noon': { bg: '#0284c7', accent: '#f59e0b', text: '#ffffff', motif: 'sun', badge: 'NOON' },
+  'twisted tea': { bg: '#854d0e', accent: '#facc15', text: '#ffffff', motif: 'leaf', badge: 'TEA' },
+  'blue moon': { bg: '#1e3a8a', accent: '#f97316', text: '#ffffff', motif: 'moon', badge: 'MOON' },
+  "tito's": { bg: '#451a03', accent: '#d97706', text: '#ffffff', motif: 'still', badge: "TITO'S" },
+  'titos': { bg: '#451a03', accent: '#d97706', text: '#ffffff', motif: 'still', badge: "TITO'S" },
+  'grey goose': { bg: '#1e3a8a', accent: '#93c5fd', text: '#ffffff', motif: 'goose', badge: 'GOOSE' },
+  'casamigos': { bg: '#78350f', accent: '#fbbf24', text: '#ffffff', motif: 'agave', badge: 'CASA' },
+  'patrón': { bg: '#064e3b', accent: '#fbbf24', text: '#ffffff', motif: 'bee', badge: 'PATRÓN' },
+  'patron': { bg: '#064e3b', accent: '#fbbf24', text: '#ffffff', motif: 'bee', badge: 'PATRÓN' },
+  'don julio': { bg: '#14532d', accent: '#eab308', text: '#ffffff', motif: 'agave', badge: 'JULIO' },
+  "jack daniel's": { bg: '#09090b', accent: '#e4e4e7', text: '#ffffff', motif: 'filigree', badge: 'JACK' },
+  'jameson': { bg: '#064e3b', accent: '#fef08a', text: '#ffffff', motif: 'crest', badge: 'JAMESON' },
+  'crown royal': { bg: '#581c87', accent: '#fbbf24', text: '#ffffff', motif: 'crown', badge: 'CROWN' },
+  'hennessy': { bg: '#451a03', accent: '#fbbf24', text: '#ffffff', motif: 'crest', badge: 'HENNESSY' },
+  'captain morgan': { bg: '#7f1d1d', accent: '#fbbf24', text: '#ffffff', motif: 'anchor', badge: 'CAPTAIN' },
+  'fireball': { bg: '#c2410c', accent: '#facc15', text: '#ffffff', motif: 'flame', badge: 'FIREBALL' },
+  'smirnoff': { bg: '#991b1b', accent: '#ffffff', text: '#ffffff', motif: 'crest', badge: 'SMIRNOFF' },
+  'bacardi': { bg: '#7f1d1d', accent: '#facc15', text: '#ffffff', motif: 'bat', badge: 'BACARDI' },
+  'absolut': { bg: '#0284c7', accent: '#ffffff', text: '#ffffff', motif: 'bottle', badge: 'ABSOLUT' },
+  'red bull': { bg: '#1e3a8a', accent: '#ef4444', text: '#fbbf24', motif: 'sun', badge: 'RED BULL' },
+  'monster energy': { bg: '#09090b', accent: '#22c55e', text: '#ffffff', motif: 'claw', badge: 'MONSTER' },
+  'coca-cola': { bg: '#dc2626', accent: '#ffffff', text: '#ffffff', motif: 'wave', badge: 'COKE' }
+};
+
+/**
+ * Deterministically derives a rich two-tone palette for any craft or unlisted brand.
+ */
+function deriveBrandColors(name = '') {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash << 5) - hash + name.charCodeAt(i);
+    hash |= 0;
+  }
+  const hues = [
+    { bg: '#0f172a', accent: '#38bdf8' }, // deep slate / sky
+    { bg: '#1e1b4b', accent: '#818cf8' }, // indigo / violet
+    { bg: '#064e3b', accent: '#34d399' }, // emerald / mint
+    { bg: '#701a75', accent: '#f472b6' }, // fuchsia / pink
+    { bg: '#451a03', accent: '#fbbf24' }, // warm amber / gold
+    { bg: '#14532d', accent: '#a3e635' }, // forest / lime
+    { bg: '#1c1917', accent: '#fb923c' }, // charcoal / orange
+    { bg: '#1e3a8a', accent: '#60a5fa' }, // royal blue / cyan
+    { bg: '#7f1d1d', accent: '#f87171' }  // crimson / coral
+  ];
+  const idx = Math.abs(hash) % hues.length;
+  return hues[idx];
+}
+
+/**
+ * Generates an authentic, crisp vector SVG logo data URI for an individual brand.
+ *
+ * @param {string} brandName - Name of the brand (e.g. "Bud Light", "Tito's", "Casamigos")
+ * @param {string} category - Optional item category (e.g. "Beer", "Liquor", "Wine")
+ * @returns {string} SVG Data URI ready for <img> src or printing
+ */
+export function generateBrandedVectorLogo(brandName = 'Retail Item', category = '') {
+  const cleanBrand = String(brandName || 'Retail Item').trim();
+  const lower = cleanBrand.toLowerCase();
+  const preset = BRAND_PRESET_PALETTES[lower] || deriveBrandColors(cleanBrand);
+
+  const bg = preset.bg || '#0f172a';
+  const accent = preset.accent || '#38bdf8';
+  const textCol = preset.text || '#ffffff';
+
+  // Format initials or badge text
+  let badgeText = preset.badge;
+  if (!badgeText) {
+    const words = cleanBrand.split(/\s+/).filter(Boolean);
+    if (words.length === 1) {
+      badgeText = cleanBrand.slice(0, Math.min(8, cleanBrand.length)).toUpperCase();
+    } else {
+      badgeText = words.slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+    }
+  }
+
+  // Sanitize for XML attributes
+  const escName = cleanBrand.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escBadge = badgeText.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
+  // SVG dimensions: 200x200
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="g_${Math.abs(cleanBrand.length)}" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${bg}" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="28" fill="url(#g_${Math.abs(cleanBrand.length)})" />
+  <circle cx="100" cy="100" r="86" fill="none" stroke="${accent}" stroke-width="5" stroke-dasharray="6 3" />
+  <circle cx="100" cy="100" r="76" fill="none" stroke="${accent}" stroke-width="1.5" opacity="0.6" />
+  <path d="M100 28 L108 44 L126 44 L112 56 L118 72 L100 62 L82 72 L88 56 L74 44 L92 44 Z" fill="${accent}" />
+  <text x="100" y="112" font-family="system-ui, -apple-system, sans-serif" font-size="${badgeText.length > 5 ? 24 : 32}" font-weight="900" fill="${textCol}" text-anchor="middle" letter-spacing="1.5">${escBadge}</text>
+  <line x1="45" y1="126" x2="155" y2="126" stroke="${accent}" stroke-width="2" />
+  <text x="100" y="152" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="${accent}" text-anchor="middle" letter-spacing="1">${escName.length > 16 ? escName.slice(0, 15) + '…' : escName}</text>
+</svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/**
  * Extracts and capitalizes item volume/packaging using exact capitalization rules:
  * Examples: '11oz', '1 L', '750ml', '1.75L', '12-Pack', '16oz', '375ml'
  */
@@ -475,6 +590,7 @@ export function createAveryQueueItem(rawItem = {}, overrides = {}) {
 
   const brand = overrides.brand || rawItem.brand || extractItemBrand(rawItem);
   const rawPrice = overrides.price !== undefined ? overrides.price : rawItem.price;
+  const logoUrl = overrides.logoUrl || rawItem.logoUrl || (brand ? generateBrandedVectorLogo(brand, overrides.category || rawItem.category) : DEFAULT_STORE_LOGO_SVG);
 
   return {
     id: overrides.id || rawItem.id || `lbl-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -488,7 +604,8 @@ export function createAveryQueueItem(rawItem = {}, overrides = {}) {
       : (rawItem.barcode?.digits || rawItem.barcode?.original || rawItem.barcode || ''),
     brand,
     category: overrides.category || rawItem.category || '',
-    copies: Math.max(1, Math.min(100, Number(overrides.copies || rawItem.copies || 1)))
+    copies: Math.max(1, Math.min(100, Number(overrides.copies || rawItem.copies || 1))),
+    logoUrl
   };
 }
 
@@ -499,7 +616,7 @@ export function createAveryQueueItem(rawItem = {}, overrides = {}) {
  *
  * @param {string} templateId - Avery code (e.g. '5160')
  * @param {Array} items - List of inventory or queue items
- * @param {Object} options - { startSlot: 1, copiesPerItem: 1 }
+ * @param {Object} options - { startSlot: 1, copiesPerItem: 1, brandLogos: Map|Object }
  * @returns {Object} { template, sheets: [ { sheetIndex, slots: [ { slotNumber, isOffsetEmpty, item } ] } ], totalLabelsToPrint, totalSheets, startSlot }
  */
 export function calculateAverySheetSlots(templateId = '5160', items = [], options = {}) {
@@ -508,6 +625,22 @@ export function calculateAverySheetSlots(templateId = '5160', items = [], option
 
   const startSlot = Math.max(1, Math.min(labelsPerSheet, Number(options.startSlot) || 1));
   const globalCopies = Math.max(1, Math.min(100, Number(options.copiesPerItem) || 1));
+  const brandLogos = options.brandLogos || null;
+
+  function resolveItemLogo(brandName, category, explicitLogo) {
+    if (explicitLogo && explicitLogo !== DEFAULT_STORE_LOGO_SVG) return explicitLogo;
+    if (brandLogos) {
+      const lower = String(brandName || '').toLowerCase().trim();
+      if (brandLogos instanceof Map) {
+        if (brandLogos.has(lower)) return brandLogos.get(lower);
+        if (brandLogos.has(brandName)) return brandLogos.get(brandName);
+      } else if (typeof brandLogos === 'object') {
+        if (brandLogos[lower]) return brandLogos[lower];
+        if (brandLogos[brandName]) return brandLogos[brandName];
+      }
+    }
+    return generateBrandedVectorLogo(brandName, category);
+  }
 
   // Expand items by copies (either item-level copies or global copies)
   const expandedItems = [];
@@ -544,6 +677,7 @@ export function calculateAverySheetSlots(templateId = '5160', items = [], option
         const finalPrice = it.price ? (String(it.price).startsWith('$') ? String(it.price) : formatLabelPrice(it.price)) : '$0.00';
         const barcodeVal = it.barcode?.digits || it.barcode?.original || it.barcode || '';
         const brandVal = it.brand || extractItemBrand(it);
+        const logoUrl = resolveItemLogo(brandVal, it.category, it.logoUrl);
 
         slots.push({
           slotNumber: slot,
@@ -558,7 +692,8 @@ export function calculateAverySheetSlots(templateId = '5160', items = [], option
             category: it.category || '',
             barcode: barcodeVal,
             brand: brandVal,
-            copies: it.copies || 1
+            copies: it.copies || 1,
+            logoUrl
           }
         });
       } else {

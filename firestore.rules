@@ -57,6 +57,52 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidBrand(data, userId, brandId) {
+      return data.keys().hasAll(['id', 'userId', 'name', 'logoUrl', 'updatedAt'])
+        && data.id == brandId
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 128
+        && data.logoUrl is string
+        && data.logoUrl.size() <= 1000000
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCatalog(data, userId, catalogId) {
+      return data.keys().hasAll(['id', 'userId', 'name', 'itemsJson', 'itemCount', 'updatedAt'])
+        && data.id == catalogId
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 128
+        && data.itemsJson is string
+        && data.itemsJson.size() <= 5000000
+        && data.itemCount is number
+        && data.itemCount >= 0
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidLayout(data, userId, layoutId) {
+      return data.keys().hasAll(['id', 'userId', 'name', 'templateId', 'configJson', 'itemCount', 'updatedAt'])
+        && data.id == layoutId
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 128
+        && data.templateId is string
+        && data.templateId.size() > 0
+        && data.templateId.size() <= 32
+        && data.configJson is string
+        && data.configJson.size() <= 2000000
+        && data.itemCount is number
+        && data.itemCount >= 0
+        && data.updatedAt is timestamp;
+    }
+
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId);
       allow list: if false;
@@ -89,6 +135,33 @@ service cloud.firestore {
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'decisionsJson', 'itemCount', 'approvedCount', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(sessionId);
+      }
+
+      match /brands/{brandId} {
+        allow get, list: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && isValidId(brandId)
+          && isValidBrand(incoming(), userId, brandId)
+          && incoming().updatedAt == request.time;
+        allow delete: if isOwner(userId) && isValidId(brandId);
+      }
+
+      match /catalog/{catalogId} {
+        allow get, list: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && isValidId(catalogId)
+          && isValidCatalog(incoming(), userId, catalogId)
+          && incoming().updatedAt == request.time;
+        allow delete: if isOwner(userId) && isValidId(catalogId);
+      }
+
+      match /layouts/{layoutId} {
+        allow get, list: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && isValidId(layoutId)
+          && isValidLayout(incoming(), userId, layoutId)
+          && incoming().updatedAt == request.time;
+        allow delete: if isOwner(userId) && isValidId(layoutId);
       }
     }
   }

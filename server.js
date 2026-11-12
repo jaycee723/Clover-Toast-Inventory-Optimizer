@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 dotenv.config({ override: true });
 import { GoogleGenAI, Type } from '@google/genai';
 import { generateRuleBasedFormatting } from './src/formatting_rules.js';
+import { generateBrandedVectorLogo } from './src/avery_templates.js';
 import { requireAuth } from './src/middleware/auth.js';
 import { getOrCreateUser } from './src/db/users.ts';
 import {
@@ -387,6 +388,143 @@ Respond with direct conversational markdown. If proposing changes, include a JSO
   } catch (err) {
     console.error('Server error handling AI chat:', err);
     return res.status(500).json({ ok: false, error: 'Internal server error in AI chat' });
+  }
+});
+
+// --- Brand Logo Discovery & Gemini Web Crawling Endpoints ---
+/**
+ * POST /api/ai/brand-logo
+ * Crawls websites online using Gemini with Google Search to discover official direct logo images,
+ * with branded vector SVG fallback if offline, rate-limited, or host-protected.
+ */
+app.post('/api/ai/brand-logo', async (req, res) => {
+  try {
+    const { brandName, category } = req.body || {};
+    const cleanBrand = String(brandName || '').trim();
+    if (!cleanBrand) {
+      return res.status(400).json({ ok: false, error: 'Brand name is required' });
+    }
+
+    const ai = getGeminiClient();
+    let logoUrl = null;
+    let source = 'vector';
+    let officialWebsite = null;
+
+    if (ai) {
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: `Find the official direct brand logo image URL for the beverage/retail brand "${cleanBrand}" (product category: ${category || 'Beverage/Liquor/Retail'}).
+Use Google Search to find an authentic high-resolution logo image (preferably transparent PNG, SVG, or high-res image from Wikimedia Commons, Wikipedia, or the official brand domain).
+Respond with JSON ONLY:
+{
+  "brand": "${cleanBrand}",
+  "logoUrl": "<direct image URL or null if not found>",
+  "officialWebsite": "<official website or null>"
+}`,
+          config: {
+            tools: [{ googleSearch: {} }],
+            responseMimeType: 'application/json'
+          }
+        });
+
+        const parsed = extractJsonFromText(response.text);
+        if (parsed?.logoUrl && typeof parsed.logoUrl === 'string' && (parsed.logoUrl.startsWith('http://') || parsed.logoUrl.startsWith('https://'))) {
+          logoUrl = parsed.logoUrl;
+          source = 'gemini';
+          officialWebsite = parsed.officialWebsite || null;
+        }
+      } catch (geminiErr) {
+        console.info(`[Brand Logo] Gemini search notice for "${cleanBrand}":`, geminiErr?.message || geminiErr);
+      }
+    }
+
+    // High-resolution branded vector SVG fallback if not found or no key
+    if (!logoUrl) {
+      logoUrl = generateBrandedVectorLogo(cleanBrand, category);
+      source = 'vector';
+    }
+
+    return res.json({
+      ok: true,
+      brand: cleanBrand,
+      logoUrl,
+      source,
+      officialWebsite
+    });
+  } catch (err) {
+    console.error('Error fetching brand logo:', err);
+    return res.status(500).json({ ok: false, error: 'Internal server error discovering brand logo' });
+  }
+});
+
+/**
+ * POST /api/ai/batch-brand-logos
+ * Auto-fetches logos for a list of brands.
+ */
+app.post('/api/ai/batch-brand-logos', async (req, res) => {
+  try {
+    const { brands } = req.body || {};
+    if (!Array.isArray(brands) || !brands.length) {
+      return res.status(400).json({ ok: false, error: 'Array of brands is required' });
+    }
+
+    const ai = getGeminiClient();
+    const results = [];
+    const maxBatch = brands.slice(0, 30);
+
+    for (const b of maxBatch) {
+      const brandName = typeof b === 'string' ? b.trim() : (b.name || b.brand || '').trim();
+      const category = typeof b === 'object' ? (b.category || '') : '';
+      if (!brandName) continue;
+
+      let logoUrl = null;
+      let source = 'vector';
+
+      if (ai) {
+        try {
+          const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Find the official direct brand logo image URL for the brand "${brandName}" (${category || 'Retail/Beverage'}).
+Return JSON:
+{
+  "brand": "${brandName}",
+  "logoUrl": "<direct image URL or null>"
+}`,
+            config: {
+              tools: [{ googleSearch: {} }],
+              responseMimeType: 'application/json'
+            }
+          });
+          const parsed = extractJsonFromText(response.text);
+          if (parsed?.logoUrl && typeof parsed.logoUrl === 'string' && (parsed.logoUrl.startsWith('http://') || parsed.logoUrl.startsWith('https://'))) {
+            logoUrl = parsed.logoUrl;
+            source = 'gemini';
+          }
+        } catch {
+          // Graceful fallback
+        }
+      }
+
+      if (!logoUrl) {
+        logoUrl = generateBrandedVectorLogo(brandName, category);
+        source = 'vector';
+      }
+
+      results.push({
+        brand: brandName,
+        logoUrl,
+        source
+      });
+    }
+
+    return res.json({
+      ok: true,
+      results
+    });
+  } catch (err) {
+    console.error('Error in batch brand logos:', err);
+    return res.status(500).json({ ok: false, error: 'Internal server error in batch brand logos' });
   }
 });
 

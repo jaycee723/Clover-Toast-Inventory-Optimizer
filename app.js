@@ -44,6 +44,15 @@ import {
   loadCloudSession,
   deleteCloudSession,
   getAccessToken,
+  saveBrandToFirestore,
+  loadBrandsFromFirestore,
+  deleteBrandFromFirestore,
+  savePersistentCatalogToFirestore,
+  loadPersistentCatalogFromFirestore,
+  saveAveryLayoutToFirestore,
+  listAveryLayoutsFromFirestore,
+  loadAveryLayoutFromFirestore,
+  deleteAveryLayoutFromFirestore,
 } from './src/firebase.js';
 import {
   scanInventoryForSpellingSuggestions,
@@ -71,7 +80,8 @@ import {
   formatLabelPrice,
   extractItemBrand,
   groupItemsByBrand,
-  createAveryQueueItem
+  createAveryQueueItem,
+  generateBrandedVectorLogo,
 } from './src/avery_templates.js';
 import { parseCsv } from './src/csv.js';
 import {
@@ -986,6 +996,9 @@ onAuthChange((user) => {
   if (user) {
     if (userStatus) userStatus.textContent = `Signed in: ${user.email || user.displayName || user.uid}`;
     if (authBtn) authBtn.textContent = 'Sign out';
+    if (typeof syncLayoutsFromCloud === 'function') {
+      syncLayoutsFromCloud();
+    }
   } else {
     if (userStatus) userStatus.textContent = 'Not signed in';
     if (authBtn) authBtn.textContent = 'Sign in with Google';
@@ -3593,6 +3606,61 @@ bindClick('btnConfirmDriveImport', async () => {
 // Avery Price Tag & Sticker Label Printing Studio Controller
 // ==========================================================================
 
+export const AVERY_PRESET_LAYOUTS = {
+  preset_weekly_shelf_tags: {
+    id: 'preset_weekly_shelf_tags',
+    name: 'Weekly Shelf Tags',
+    isPreset: true,
+    templateId: '5160',
+    filterCategory: 'all',
+    filterStatus: 'approved',
+    startSlot: 1,
+    copies: 1,
+    showGuide: false,
+    selectedBrand: '',
+    description: 'Standard 2⅝″ × 1″ tags (30/sheet) for weekly inventory shelf audits'
+  },
+  preset_new_product_launch: {
+    id: 'preset_new_product_launch',
+    name: 'New Product Launch Stickers',
+    isPreset: true,
+    templateId: '5162',
+    filterCategory: 'all',
+    filterStatus: 'all',
+    startSlot: 1,
+    copies: 2,
+    showGuide: true,
+    selectedBrand: '',
+    description: 'Large 4″ × 1⅓″ prominent stickers (14/sheet) with 2 copies per item'
+  },
+  preset_clearance_blowout: {
+    id: 'preset_clearance_blowout',
+    name: 'Clearance & Promo Labels',
+    isPreset: true,
+    templateId: '5161',
+    filterCategory: 'all',
+    filterStatus: 'all',
+    startSlot: 1,
+    copies: 1,
+    showGuide: false,
+    selectedBrand: '',
+    description: 'Wide 4″ × 1″ labels (20/sheet) for sales displays and promotional items'
+  },
+  preset_bottle_neck_tags: {
+    id: 'preset_bottle_neck_tags',
+    name: 'Bottle Neck & Return Tags',
+    isPreset: true,
+    templateId: '5167',
+    filterCategory: 'all',
+    filterStatus: 'all',
+    startSlot: 1,
+    copies: 1,
+    showGuide: false,
+    selectedBrand: '',
+    description: 'Slim 1¾″ × ½″ micro-tags (80/sheet) for high-density bottle collar tags'
+  }
+};
+
 export const averyStudioState = {
   templateId: '5160',
   logoUrl: DEFAULT_STORE_LOGO_SVG,
@@ -3604,8 +3672,27 @@ export const averyStudioState = {
   showGuide: false,
   currentSheet: 1,
   printQueue: [],
-  isQueueInitialized: false
+  isQueueInitialized: false,
+  activeSubtab: 'print', // 'print' | 'brands'
+  brandRegistry: new Map(), // Map<brandNameLower, { id, name, logoUrl, source, category, website, itemCount }>
+  brandSearchQuery: '',
+  activeLayoutId: 'preset_weekly_shelf_tags',
+  activeLayoutName: 'Weekly Shelf Tags',
+  userSavedLayouts: []
 };
+
+/**
+ * Returns the individual logo URL for a brand, checking the registry first
+ * and falling back to an authentic, high-res branded vector SVG badge.
+ */
+export function getBrandLogo(brandName = '', category = '') {
+  const clean = String(brandName || '').trim();
+  if (!clean) return DEFAULT_STORE_LOGO_SVG;
+  const lower = clean.toLowerCase();
+  const entry = averyStudioState.brandRegistry.get(lower);
+  if (entry?.logoUrl) return entry.logoUrl;
+  return generateBrandedVectorLogo(clean, category);
+}
 
 export function getAveryCatalogItems() {
   const source = (S.rows && S.rows.length > 0)
@@ -3993,7 +4080,8 @@ export function renderAveryLabelPreview() {
 
   const result = calculateAverySheetSlots(averyStudioState.templateId, queueItems, {
     startSlot: averyStudioState.startSlot,
-    copiesPerItem: averyStudioState.copies
+    copiesPerItem: averyStudioState.copies,
+    brandLogos: averyStudioState.brandRegistry
   });
 
   const totalSheets = Math.max(1, result.sheets.length);
@@ -4052,15 +4140,19 @@ export function renderAveryLabelPreview() {
           inner.className = 'avery-label-inner';
           inner.style.padding = template.fontScale.paddingIn;
 
-          // Left: Brand Logo
+          // Left: Individual Brand Logo
           const logoCol = document.createElement('div');
           logoCol.className = 'avery-label-logo-col';
           logoCol.style.width = `${template.fontScale.logoWidthIn * 72}px`;
 
           const img = document.createElement('img');
           img.className = 'avery-label-logo-img';
-          img.src = averyStudioState.logoUrl;
-          img.alt = 'Logo';
+          const itemLogo = slot.item.logoUrl || getBrandLogo(slot.item.brand, slot.item.category);
+          img.src = itemLogo;
+          img.alt = slot.item.brand ? `${slot.item.brand} Logo` : 'Brand Logo';
+          img.onerror = () => {
+            img.src = generateBrandedVectorLogo(slot.item.brand, slot.item.category);
+          };
           logoCol.append(img);
 
           // Right: Item Content - All 3 Rows Guaranteed Visible
@@ -4159,8 +4251,12 @@ export function renderAveryLabelPreview() {
 
           const img = document.createElement('img');
           img.className = 'avery-label-logo-img';
-          img.src = averyStudioState.logoUrl;
-          img.alt = 'Logo';
+          const itemLogo = slot.item.logoUrl || getBrandLogo(slot.item.brand, slot.item.category);
+          img.src = itemLogo;
+          img.alt = slot.item.brand ? `${slot.item.brand} Logo` : 'Brand Logo';
+          img.onerror = () => {
+            img.src = generateBrandedVectorLogo(slot.item.brand, slot.item.category);
+          };
           logoCol.append(img);
 
           const contentCol = document.createElement('div');
@@ -4403,8 +4499,752 @@ bindClick('btnPrintAveryLabels', () => {
   window.print();
 });
 
-// Initial boot for Avery Price Tag Studio
-if (typeof window !== 'undefined') {
-  initAveryQueue(false);
-  renderAveryLabelPreview();
+// ==========================================================================
+// Avery Saved Layouts Controller (Cloud Firestore + Presets)
+// ==========================================================================
+
+export function syncAveryControlsToState() {
+  const templateSel = $('averyTemplateSelect');
+  if (templateSel) templateSel.value = averyStudioState.templateId;
+
+  const filterSel = $('averyItemFilterSelect');
+  if (filterSel) {
+    filterSel.value = (averyStudioState.filterStatus === 'approved') ? 'approved' : averyStudioState.filterCategory;
+  }
+
+  const slotInput = $('averyStartSlotInput');
+  if (slotInput) slotInput.value = String(averyStudioState.startSlot);
+
+  const copiesInput = $('averyCopiesInput');
+  if (copiesInput) copiesInput.value = String(averyStudioState.copies);
+
+  const guideCheck = $('averyShowBordersCheck');
+  if (guideCheck) guideCheck.checked = averyStudioState.showGuide;
+
+  const brandSel = $('averyBrandSelect');
+  if (brandSel && averyStudioState.selectedBrand) brandSel.value = averyStudioState.selectedBrand;
 }
+
+export function populateAveryLayoutsSelect(selectedId) {
+  const select = $('averySavedLayoutsSelect');
+  const optgroup = $('averyUserLayoutsOptgroup');
+  if (!select || !optgroup) return;
+
+  optgroup.replaceChildren();
+
+  if (!averyStudioState.userSavedLayouts || averyStudioState.userSavedLayouts.length === 0) {
+    const emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.disabled = true;
+    emptyOpt.textContent = 'No custom layouts saved yet';
+    optgroup.append(emptyOpt);
+  } else {
+    averyStudioState.userSavedLayouts.forEach((l) => {
+      const opt = document.createElement('option');
+      opt.value = l.id;
+      const count = l.itemCount !== undefined ? l.itemCount : (l.config?.items?.length || 0);
+      opt.textContent = `📋 ${l.name} (${count} tags)`;
+      optgroup.append(opt);
+    });
+  }
+
+  const targetId = selectedId || averyStudioState.activeLayoutId || 'preset_weekly_shelf_tags';
+  select.value = targetId;
+
+  const badge = $('activeLayoutBadge');
+  const deleteBtn = $('btnDeleteCurrentLayout');
+
+  const isUserLayout = targetId && !targetId.startsWith('preset_');
+  if (deleteBtn) {
+    deleteBtn.style.display = isUserLayout ? 'inline-flex' : 'none';
+  }
+
+  let displayName = averyStudioState.activeLayoutName || 'Weekly Shelf Tags';
+  if (AVERY_PRESET_LAYOUTS[targetId]) {
+    displayName = AVERY_PRESET_LAYOUTS[targetId].name;
+  } else {
+    const userL = averyStudioState.userSavedLayouts.find((l) => l.id === targetId);
+    if (userL) displayName = userL.name;
+  }
+
+  if (badge) {
+    badge.innerHTML = `<span style="font-size:10px;">●</span> Active: ${escapeHtml(displayName)}`;
+  }
+}
+
+export async function applyAveryLayout(layoutId) {
+  if (!layoutId) return;
+
+  if (AVERY_PRESET_LAYOUTS[layoutId]) {
+    const preset = AVERY_PRESET_LAYOUTS[layoutId];
+    averyStudioState.activeLayoutId = preset.id;
+    averyStudioState.activeLayoutName = preset.name;
+    averyStudioState.templateId = preset.templateId;
+    averyStudioState.filterCategory = preset.filterCategory || 'all';
+    averyStudioState.filterStatus = preset.filterStatus || 'all';
+    averyStudioState.startSlot = preset.startSlot || 1;
+    averyStudioState.copies = preset.copies || 1;
+    averyStudioState.showGuide = Boolean(preset.showGuide);
+    averyStudioState.selectedBrand = preset.selectedBrand || '';
+
+    initAveryQueue(true);
+    syncAveryControlsToState();
+    populateAveryLayoutsSelect(preset.id);
+    renderAveryLabelPreview();
+    postAiAnnouncement(`📁 Switched Avery label layout to preset: "${preset.name}".`);
+    return preset;
+  }
+
+  let layout = averyStudioState.userSavedLayouts.find((l) => l.id === layoutId);
+  if (!layout) {
+    try {
+      layout = await loadAveryLayoutFromFirestore(layoutId);
+    } catch (err) {
+      console.warn('Failed loading layout from cloud:', err);
+    }
+  }
+
+  if (!layout) {
+    alert('Could not find the requested label layout.');
+    return;
+  }
+
+  const config = layout.config || {};
+  averyStudioState.activeLayoutId = layout.id;
+  averyStudioState.activeLayoutName = layout.name;
+  averyStudioState.templateId = config.templateId || layout.templateId || '5160';
+  averyStudioState.filterCategory = config.filterCategory || 'all';
+  averyStudioState.filterStatus = config.filterStatus || 'all';
+  averyStudioState.startSlot = Number(config.startSlot) || 1;
+  averyStudioState.copies = Number(config.copies) || 1;
+  averyStudioState.showGuide = Boolean(config.showGuide);
+  averyStudioState.selectedBrand = config.selectedBrand || '';
+
+  if (config.items && Array.isArray(config.items) && config.items.length > 0) {
+    averyStudioState.printQueue = config.items.map((it) => ({ ...it }));
+    averyStudioState.isQueueInitialized = true;
+    renderAveryQueueTable();
+  } else {
+    initAveryQueue(true);
+  }
+
+  syncAveryControlsToState();
+  populateAveryLayoutsSelect(layout.id);
+  renderAveryLabelPreview();
+  postAiAnnouncement(`📁 Loaded Avery label layout: "${layout.name}" (${averyStudioState.printQueue.length} queued labels).`);
+  return layout;
+}
+
+export function openSaveLayoutModal() {
+  const modal = $('averySaveLayoutModal');
+  if (!modal) return;
+
+  const template = AVERY_TEMPLATES[averyStudioState.templateId] || AVERY_TEMPLATES['5160'];
+  const templateText = $('saveLayoutModalTemplateText');
+  if (templateText) {
+    templateText.textContent = `${template.code} (${template.labelWidthIn}″ × ${template.labelHeightIn}″)`;
+  }
+
+  const itemsCountText = $('saveLayoutModalItemsCount');
+  if (itemsCountText) {
+    itemsCountText.textContent = `${averyStudioState.printQueue.length} items`;
+  }
+
+  const copiesText = $('saveLayoutModalCopiesText');
+  if (copiesText) {
+    copiesText.textContent = `${averyStudioState.copies} cop${averyStudioState.copies === 1 ? 'y' : 'ies'}`;
+  }
+
+  const slotText = $('saveLayoutModalSlotText');
+  if (slotText) {
+    slotText.textContent = `Slot #${averyStudioState.startSlot}`;
+  }
+
+  const nameInput = $('inputSaveLayoutName');
+  if (nameInput) {
+    const isPreset = averyStudioState.activeLayoutId.startsWith('preset_');
+    nameInput.value = isPreset ? `${averyStudioState.activeLayoutName} - Custom` : averyStudioState.activeLayoutName;
+    setTimeout(() => nameInput.focus(), 50);
+  }
+
+  modal.style.display = 'flex';
+}
+
+export function closeSaveLayoutModal() {
+  const modal = $('averySaveLayoutModal');
+  if (modal) modal.style.display = 'none';
+}
+
+export async function saveCurrentAveryLayout(layoutName) {
+  const trimmed = String(layoutName || '').trim();
+  if (!trimmed) {
+    alert('Please enter a name for this label layout.');
+    return null;
+  }
+
+  const layoutPayload = {
+    name: trimmed,
+    templateId: averyStudioState.templateId,
+    filterCategory: averyStudioState.filterCategory,
+    filterStatus: averyStudioState.filterStatus,
+    startSlot: averyStudioState.startSlot,
+    copies: averyStudioState.copies,
+    showGuide: averyStudioState.showGuide,
+    selectedBrand: averyStudioState.selectedBrand,
+    items: averyStudioState.printQueue.map((it) => ({
+      id: it.id,
+      name: it.name,
+      displayName: it.displayName,
+      volume: it.volume,
+      price: it.price,
+      barcode: it.barcode,
+      category: it.category,
+      brand: it.brand,
+      copies: it.copies,
+      logoUrl: it.logoUrl
+    }))
+  };
+
+  const saved = await saveAveryLayoutToFirestore(layoutPayload);
+  if (saved) {
+    const idx = averyStudioState.userSavedLayouts.findIndex((l) => l.id === saved.id);
+    if (idx >= 0) {
+      averyStudioState.userSavedLayouts[idx] = saved;
+    } else {
+      averyStudioState.userSavedLayouts.unshift(saved);
+    }
+
+    averyStudioState.activeLayoutId = saved.id;
+    averyStudioState.activeLayoutName = saved.name;
+    populateAveryLayoutsSelect(saved.id);
+    closeSaveLayoutModal();
+    postAiAnnouncement(`💾 Saved Avery label layout "${saved.name}" to Cloud Firestore!`);
+  }
+  return saved;
+}
+
+export async function deleteSelectedAveryLayout() {
+  const layoutId = averyStudioState.activeLayoutId;
+  if (!layoutId || layoutId.startsWith('preset_')) {
+    alert('Standard built-in presets cannot be deleted.');
+    return false;
+  }
+
+  const confirmed = confirm(`Are you sure you want to delete the layout "${averyStudioState.activeLayoutName}" from Cloud Firestore?`);
+  if (!confirmed) return false;
+
+  await deleteAveryLayoutFromFirestore(layoutId);
+  averyStudioState.userSavedLayouts = averyStudioState.userSavedLayouts.filter((l) => l.id !== layoutId);
+
+  await applyAveryLayout('preset_weekly_shelf_tags');
+  populateAveryLayoutsSelect('preset_weekly_shelf_tags');
+  postAiAnnouncement('🗑️ Deleted Avery label layout from Cloud Firestore.');
+  return true;
+}
+
+export async function syncLayoutsFromCloud() {
+  try {
+    const layouts = await listAveryLayoutsFromFirestore();
+    averyStudioState.userSavedLayouts = layouts || [];
+    populateAveryLayoutsSelect(averyStudioState.activeLayoutId);
+    postAiAnnouncement(`↺ Avery label layouts synced with Cloud Firestore (${averyStudioState.userSavedLayouts.length} saved layouts).`);
+  } catch (err) {
+    console.warn('Sync layouts error:', err);
+  }
+}
+
+// Bind Avery Saved Layouts Event Listeners
+const averySavedLayoutsSelect = $('averySavedLayoutsSelect');
+if (averySavedLayoutsSelect) {
+  averySavedLayoutsSelect.addEventListener('change', (e) => {
+    applyAveryLayout(e.target.value);
+  });
+}
+
+bindClick('btnSaveCurrentLayout', () => openSaveLayoutModal());
+bindClick('btnCloseSaveLayoutModal', () => closeSaveLayoutModal());
+bindClick('btnCloseSaveLayoutModalX', () => closeSaveLayoutModal());
+bindClick('btnConfirmSaveLayout', async () => {
+  const name = $('inputSaveLayoutName')?.value;
+  await saveCurrentAveryLayout(name);
+});
+bindClick('btnDeleteCurrentLayout', () => deleteSelectedAveryLayout());
+bindClick('btnSyncLayoutsCloud', () => syncLayoutsFromCloud());
+
+// ==========================================================================
+// Brand & Logo Manager Controller & Persistent Memory Sync
+// ==========================================================================
+
+export function switchAverySubtab(tabName) {
+  averyStudioState.activeSubtab = tabName;
+  const printBtn = $('tabAveryPrintBtn');
+  const brandsBtn = $('tabAveryBrandsBtn');
+  const printView = $('averyPrintView');
+  const brandsView = $('averyBrandsView');
+
+  if (tabName === 'brands') {
+    if (brandsBtn) brandsBtn.classList.add('active');
+    if (printBtn) printBtn.classList.remove('active');
+    if (printView) printView.style.display = 'none';
+    if (brandsView) brandsView.style.display = 'block';
+    renderBrandCards();
+  } else {
+    if (printBtn) printBtn.classList.add('active');
+    if (brandsBtn) brandsBtn.classList.remove('active');
+    if (printView) printView.style.display = 'block';
+    if (brandsView) brandsView.style.display = 'none';
+    renderAveryLabelPreview();
+  }
+}
+
+export function renderBrandCards() {
+  const grid = $('averyBrandCardsGrid');
+  const countBadge = $('tabBrandCountBadge');
+  const statsSummary = $('brandStatsSummary');
+
+  const catalog = (S.rows && S.rows.length > 0) ? S.rows : ((S.records && S.records.length > 0) ? S.records : SAMPLE_777_INVENTORY);
+  const detectedGroups = groupItemsByBrand(catalog);
+
+  // Sync detected catalog brands into brandRegistry
+  detectedGroups.forEach(({ brand, count }) => {
+    const lower = brand.toLowerCase();
+    if (!averyStudioState.brandRegistry.has(lower)) {
+      averyStudioState.brandRegistry.set(lower, {
+        id: 'b_' + lower.replace(/[^a-z0-9]/g, '_').slice(0, 60),
+        name: brand,
+        logoUrl: generateBrandedVectorLogo(brand),
+        source: 'vector',
+        itemCount: count
+      });
+    } else {
+      const entry = averyStudioState.brandRegistry.get(lower);
+      entry.itemCount = count;
+    }
+  });
+
+  const allBrands = Array.from(averyStudioState.brandRegistry.values());
+  const withCustomOrGemini = allBrands.filter((b) => b.source === 'custom' || b.source === 'gemini');
+
+  if (countBadge) countBadge.textContent = String(allBrands.length);
+  if (statsSummary) {
+    statsSummary.textContent = `${allBrands.length} brands detected • ${withCustomOrGemini.length} custom/Gemini logos • ${allBrands.length - withCustomOrGemini.length} branded vector badges`;
+  }
+
+  if (!grid) return;
+  grid.replaceChildren();
+
+  const query = (averyStudioState.brandSearchQuery || '').toLowerCase().trim();
+  const filtered = query
+    ? allBrands.filter((b) => b.name.toLowerCase().includes(query) || (b.category || '').toLowerCase().includes(query))
+    : allBrands;
+
+  if (filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.gridColumn = '1 / -1';
+    empty.style.padding = '30px';
+    empty.style.textAlign = 'center';
+    empty.style.color = '#94a3b8';
+    empty.style.background = '#0f172a';
+    empty.style.borderRadius = '8px';
+    empty.style.border = '1px dashed #334155';
+    empty.innerHTML = query
+      ? `No brands matching "<strong>${escapeHtml(query)}</strong>".`
+      : `No brands found in registry. Click <strong>"📥 Import Cleaned Items"</strong> or <strong>"+ Add Brand"</strong> above!`;
+    grid.append(empty);
+    return;
+  }
+
+  filtered.forEach((b) => {
+    const card = document.createElement('div');
+    card.className = 'avery-brand-card';
+
+    const top = document.createElement('div');
+    top.className = 'avery-brand-card-top';
+
+    const logoBox = document.createElement('div');
+    logoBox.className = 'avery-brand-card-logo';
+    const img = document.createElement('img');
+    img.src = b.logoUrl || getBrandLogo(b.name, b.category);
+    img.alt = b.name;
+    img.onerror = () => {
+      img.src = generateBrandedVectorLogo(b.name, b.category);
+    };
+    logoBox.append(img);
+
+    const info = document.createElement('div');
+    info.className = 'avery-brand-card-info';
+    const nameEl = document.createElement('h4');
+    nameEl.className = 'avery-brand-card-name';
+    nameEl.textContent = b.name;
+
+    const meta = document.createElement('div');
+    meta.className = 'avery-brand-card-meta';
+
+    const countPill = document.createElement('span');
+    countPill.className = 'status-pill';
+    countPill.style.fontSize = '10px';
+    countPill.style.padding = '1px 6px';
+    countPill.textContent = `${b.itemCount || 0} items`;
+
+    const sourcePill = document.createElement('span');
+    sourcePill.className = 'status-pill';
+    sourcePill.style.fontSize = '10px';
+    sourcePill.style.padding = '1px 6px';
+    if (b.source === 'gemini') {
+      sourcePill.style.background = '#4338ca';
+      sourcePill.style.color = '#ffffff';
+      sourcePill.textContent = '🌐 Gemini Web';
+    } else if (b.source === 'custom') {
+      sourcePill.style.background = '#059669';
+      sourcePill.style.color = '#ffffff';
+      sourcePill.textContent = '📁 Uploaded';
+    } else {
+      sourcePill.textContent = '🎨 Branded Vector';
+    }
+
+    meta.append(countPill, sourcePill);
+    info.append(nameEl, meta);
+    top.append(logoBox, info);
+
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'avery-brand-card-actions';
+
+    // 1. Fetch with Gemini button
+    const btnGemini = document.createElement('button');
+    btnGemini.type = 'button';
+    btnGemini.className = 'btn-toast';
+    btnGemini.style.background = '#4338ca';
+    btnGemini.textContent = '🌐 Fetch with Gemini';
+    btnGemini.onclick = async () => {
+      btnGemini.disabled = true;
+      btnGemini.textContent = 'Searching web…';
+      try {
+        const res = await fetch('/api/ai/brand-logo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ brandName: b.name, category: b.category })
+        });
+        const data = await res.json();
+        if (data.ok && data.logoUrl) {
+          b.logoUrl = data.logoUrl;
+          b.source = data.source;
+          b.website = data.officialWebsite || b.website;
+          averyStudioState.brandRegistry.set(b.name.toLowerCase(), b);
+          await saveBrandToFirestore(b);
+          renderBrandCards();
+          renderAveryLabelPreview();
+          postAiAnnouncement(`✨ Discovered official logo for "${b.name}" via Gemini web search!`);
+        }
+      } catch (err) {
+        alert(`Failed to fetch logo for ${b.name}: ${err.message || err}`);
+      } finally {
+        btnGemini.disabled = false;
+        btnGemini.textContent = '🌐 Fetch with Gemini';
+      }
+    };
+
+    // 2. Upload Custom Logo
+    const uploadLabel = document.createElement('label');
+    uploadLabel.className = 'btn-outline';
+    uploadLabel.style.cursor = 'pointer';
+    uploadLabel.textContent = '📁 Upload';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.style.display = 'none';
+    fileInput.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          if (evt.target?.result) {
+            b.logoUrl = evt.target.result;
+            b.source = 'custom';
+            averyStudioState.brandRegistry.set(b.name.toLowerCase(), b);
+            await saveBrandToFirestore(b);
+            renderBrandCards();
+            renderAveryLabelPreview();
+            postAiAnnouncement(`📁 Custom logo uploaded for brand "${b.name}"!`);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    uploadLabel.append(fileInput);
+
+    // 3. Add to Print Sheet
+    const btnAddSheet = document.createElement('button');
+    btnAddSheet.type = 'button';
+    btnAddSheet.className = 'btn-secondary';
+    btnAddSheet.textContent = '⚡ Add to Sheet';
+    btnAddSheet.onclick = () => {
+      autoAddBrandToQueue(b.name);
+      switchAverySubtab('print');
+    };
+
+    // 4. Reset
+    const btnReset = document.createElement('button');
+    btnReset.type = 'button';
+    btnReset.className = 'btn-outline';
+    btnReset.style.color = '#fca5a5';
+    btnReset.textContent = '↺ Reset';
+    btnReset.onclick = async () => {
+      b.logoUrl = generateBrandedVectorLogo(b.name, b.category);
+      b.source = 'vector';
+      averyStudioState.brandRegistry.set(b.name.toLowerCase(), b);
+      await saveBrandToFirestore(b);
+      renderBrandCards();
+      renderAveryLabelPreview();
+    };
+
+    actions.append(btnGemini, uploadLabel, btnAddSheet, btnReset);
+    card.append(top, actions);
+    grid.append(card);
+  });
+}
+
+/**
+ * Imports the sanitized catalog from the inventory cleaner into the tag maker.
+ * Holds persistent items in Cloud Firestore & offline cache, and maps individual logos.
+ */
+export async function importCleanedInventoryToTagMaker() {
+  const sourceItems = (S.rows && S.rows.length > 0)
+    ? S.rows
+    : ((S.records && S.records.length > 0) ? S.records : SAMPLE_777_INVENTORY);
+
+  let targetItems = sourceItems.filter((r) => isApproved(r) || !!getBarcodeIdentity(r));
+  if (!targetItems.length) {
+    targetItems = sourceItems;
+  }
+
+  // Populate Avery queue with individual queue items
+  averyStudioState.printQueue = targetItems.map((r) => createAveryQueueItem(r));
+  averyStudioState.isQueueInitialized = true;
+  averyStudioState.currentSheet = 1;
+
+  // Persist to Cloud Firestore + local offline cache
+  try {
+    await savePersistentCatalogToFirestore(targetItems, 'Cleaned Inventory Catalog');
+  } catch (err) {
+    console.warn('Persistent catalog save notice:', err);
+  }
+
+  // Scan and register brands
+  const brandGroups = groupItemsByBrand(targetItems);
+  for (const bg of brandGroups) {
+    const lower = bg.brand.toLowerCase();
+    if (!averyStudioState.brandRegistry.has(lower)) {
+      averyStudioState.brandRegistry.set(lower, {
+        id: 'b_' + lower.replace(/[^a-z0-9]/g, '_').slice(0, 60),
+        name: bg.brand,
+        logoUrl: generateBrandedVectorLogo(bg.brand),
+        source: 'vector',
+        itemCount: bg.count
+      });
+    } else {
+      const existing = averyStudioState.brandRegistry.get(lower);
+      existing.itemCount = bg.count;
+    }
+  }
+
+  populateAveryBrandSelect();
+  renderAveryQueueTable();
+  renderBrandCards();
+  renderAveryLabelPreview();
+
+  // Switch to print view and scroll into view
+  switchAverySubtab('print');
+  const widget = $('averyLabelWidget');
+  if (widget) {
+    widget.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  postAiAnnouncement(`🏷️ Imported ${targetItems.length} cleaned items and ${brandGroups.length} brands into the Avery Price Tag Maker! Ready to print.`);
+  return targetItems.length;
+}
+
+export async function autoFetchAllMissingBrandLogos() {
+  const notice = $('averyBrandStatusNotice');
+  const allBrands = Array.from(averyStudioState.brandRegistry.values());
+  const pending = allBrands.filter((b) => b.source !== 'gemini' && b.source !== 'custom');
+
+  if (!pending.length) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.textContent = '✅ All brands already have custom or Gemini web logos!';
+      setTimeout(() => { notice.style.display = 'none'; }, 4000);
+    }
+    return;
+  }
+
+  if (notice) {
+    notice.style.display = 'block';
+    notice.textContent = `🌐 Crawling online logos for ${pending.length} brand(s) via Gemini...`;
+  }
+
+  try {
+    const res = await fetch('/api/ai/batch-brand-logos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brands: pending.map((b) => ({ name: b.name, category: b.category }))
+      })
+    });
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.results)) {
+      for (const r of data.results) {
+        const lower = r.brand.toLowerCase();
+        if (averyStudioState.brandRegistry.has(lower)) {
+          const entry = averyStudioState.brandRegistry.get(lower);
+          entry.logoUrl = r.logoUrl;
+          entry.source = r.source;
+          await saveBrandToFirestore(entry);
+        }
+      }
+    }
+    renderBrandCards();
+    renderAveryLabelPreview();
+    if (notice) {
+      notice.textContent = `✅ Successfully discovered and updated logos for ${pending.length} brand(s)!`;
+      setTimeout(() => { notice.style.display = 'none'; }, 5000);
+    }
+    postAiAnnouncement(`🌐 Gemini web crawl complete: updated logos for ${pending.length} brand(s)!`);
+  } catch (err) {
+    if (notice) {
+      notice.textContent = `Notice: Web crawl completed with vector backups: ${err.message || err}`;
+    }
+  }
+}
+
+export async function saveAllBrandsToCloud() {
+  const notice = $('averyBrandStatusNotice');
+  if (notice) {
+    notice.style.display = 'block';
+    notice.textContent = '💾 Saving brands and logos to cloud storage...';
+  }
+  const allBrands = Array.from(averyStudioState.brandRegistry.values());
+  for (const b of allBrands) {
+    await saveBrandToFirestore(b);
+  }
+  if (notice) {
+    notice.textContent = `✅ Saved ${allBrands.length} brands to Cloud Firestore & offline cache!`;
+    setTimeout(() => { notice.style.display = 'none'; }, 4000);
+  }
+  postAiAnnouncement(`💾 Saved ${allBrands.length} brand logos to cloud storage.`);
+}
+
+export async function refreshBrandsFromCloud() {
+  const notice = $('averyBrandStatusNotice');
+  if (notice) {
+    notice.style.display = 'block';
+    notice.textContent = '↺ Refreshing brands from Cloud Firestore...';
+  }
+  const loaded = await loadBrandsFromFirestore();
+  if (loaded && loaded.length) {
+    loaded.forEach((b) => {
+      averyStudioState.brandRegistry.set(b.name.toLowerCase(), b);
+    });
+  }
+  renderBrandCards();
+  renderAveryLabelPreview();
+  if (notice) {
+    notice.textContent = `✅ Refreshed ${loaded.length} brands from Cloud Firestore!`;
+    setTimeout(() => { notice.style.display = 'none'; }, 4000);
+  }
+}
+
+// Bind Sub-Tabs and Brand Manager Toolbar Listeners
+bindClick('tabAveryPrintBtn', () => switchAverySubtab('print'));
+bindClick('tabAveryBrandsBtn', () => switchAverySubtab('brands'));
+
+bindClick('btnSendCleanedToTagMaker', () => importCleanedInventoryToTagMaker());
+bindClick('btnImportCleanedToBrands', () => importCleanedInventoryToTagMaker());
+
+bindClick('btnAutoFetchAllLogos', () => autoFetchAllMissingBrandLogos());
+bindClick('btnSaveBrandsToCloud', () => saveAllBrandsToCloud());
+bindClick('btnRefreshBrandsFromCloud', () => refreshBrandsFromCloud());
+
+const brandSearch = $('averyBrandSearchInput');
+if (brandSearch) {
+  brandSearch.addEventListener('input', (e) => {
+    averyStudioState.brandSearchQuery = e.target.value;
+    renderBrandCards();
+  });
+}
+
+// Add Brand Modal Bindings
+bindClick('btnOpenAddBrandModal', () => {
+  const modal = $('averyAddBrandModal');
+  if (modal) modal.style.display = 'flex';
+});
+
+bindClick('btnCloseAddBrandModal', () => {
+  const modal = $('averyAddBrandModal');
+  if (modal) modal.style.display = 'none';
+});
+
+bindClick('btnCloseAddBrandModalX', () => {
+  const modal = $('averyAddBrandModal');
+  if (modal) modal.style.display = 'none';
+});
+
+bindClick('btnSubmitAddBrand', async () => {
+  const name = $('inputNewBrandName')?.value?.trim();
+  if (!name) {
+    alert('Please enter a brand name.');
+    return;
+  }
+  const category = $('inputNewBrandCategory')?.value?.trim() || '';
+  const logoUrl = $('inputNewBrandLogoUrl')?.value?.trim() || generateBrandedVectorLogo(name, category);
+  const source = $('inputNewBrandLogoUrl')?.value?.trim() ? 'custom' : 'vector';
+
+  const brandRecord = {
+    id: 'b_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 60),
+    name,
+    category,
+    logoUrl,
+    source,
+    itemCount: 0
+  };
+
+  averyStudioState.brandRegistry.set(name.toLowerCase(), brandRecord);
+  await saveBrandToFirestore(brandRecord);
+  renderBrandCards();
+  populateAveryBrandSelect();
+
+  const modal = $('averyAddBrandModal');
+  if (modal) modal.style.display = 'none';
+  if ($('inputNewBrandName')) $('inputNewBrandName').value = '';
+  if ($('inputNewBrandCategory')) $('inputNewBrandCategory').value = '';
+  if ($('inputNewBrandLogoUrl')) $('inputNewBrandLogoUrl').value = '';
+
+  postAiAnnouncement(`🏷️ Added brand "${name}" to your brand registry.`);
+});
+
+// Initial boot for Avery Price Tag Studio & Persistent Brand Memory & Layouts
+if (typeof window !== 'undefined') {
+  (async () => {
+    try {
+      const storedBrands = await loadBrandsFromFirestore();
+      if (storedBrands && storedBrands.length) {
+        storedBrands.forEach((b) => {
+          averyStudioState.brandRegistry.set(b.name.toLowerCase(), b);
+        });
+      }
+    } catch {}
+
+    try {
+      const storedLayouts = await listAveryLayoutsFromFirestore();
+      if (storedLayouts && storedLayouts.length) {
+        averyStudioState.userSavedLayouts = storedLayouts;
+      }
+    } catch {}
+
+    initAveryQueue(false);
+    populateAveryLayoutsSelect('preset_weekly_shelf_tags');
+    renderAveryLabelPreview();
+    renderBrandCards();
+  })();
+}
+
